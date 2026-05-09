@@ -108,12 +108,6 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
       $set: {
         username: data.username || cloudProfile?.username || "",
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
-        categories: (data.categories && data.categories.length > 0) 
-          ? data.categories 
-          : ((cloudProfile?.categories && cloudProfile.categories.length > 0) ? cloudProfile.categories : defaultCategories),
-        accounts: (data.accounts && data.accounts.length > 0) 
-          ? data.accounts 
-          : ((cloudProfile?.accounts && cloudProfile.accounts.length > 0) ? cloudProfile.accounts : defaultAccounts),
         last_sync: new Date()
       }
     };
@@ -143,18 +137,24 @@ app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
       if (tx.deleted_at) {
         return {
           deleteOne: {
-            filter: { local_id: tx.id, user_id: userId }
+            filter: { 
+              $or: [{ id: tx.id }, { local_id: tx.id }],
+              user_id: userId 
+            }
           }
         };
       }
       return {
         updateOne: {
-          filter: { local_id: tx.id, user_id: userId },
+          filter: { 
+            $or: [{ id: tx.id }, { local_id: tx.id }],
+            user_id: userId 
+          },
           update: { 
             $set: { 
               ...tx, 
               user_id: userId,
-              local_id: tx.id,
+              id: tx.id,
               updated_at: new Date(tx.updated_at),
               deleted_at: null 
             } 
@@ -181,7 +181,7 @@ app.get(["/sync/pull", "/sync/pull/"], limiter, async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
-    const query = { user_id: userId };
+    const query = { user_id: userId, deleted_at: null }; // Filter out soft-deleted items if any
     if (lastSyncTime) query.updated_at = { $gt: new Date(lastSyncTime) };
     
     const updates = await UserTransaction.find(query).lean().limit(500);
@@ -227,21 +227,23 @@ app.post("/sync/universal", limiter, async (req, res) => {
       const Collection = UserService[ServiceMethod](userId);
       
       const bulkOps = items.map(item => {
+        const filter = { 
+          $or: [{ id: item.id }, { local_id: item.id }],
+          user_id: userId 
+        };
+
         if (item.deleted_at) {
-          // If the item is marked as deleted, perform a hard delete in the cloud
           return {
-            deleteOne: {
-              filter: { id: item.id, user_id: userId }
-            }
+            deleteOne: { filter }
           };
         }
         
-        const updateData = { ...item, user_id: userId };
+        const updateData = { ...item, user_id: userId, id: item.id };
         if (item.updated_at) updateData.updated_at = new Date(item.updated_at);
         
         return {
           updateOne: {
-            filter: { id: item.id, user_id: userId },
+            filter,
             update: { $set: updateData },
             upsert: true
           }

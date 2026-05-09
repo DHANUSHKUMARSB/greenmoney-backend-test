@@ -14,7 +14,7 @@ const transactionSchema = new mongoose.Schema({
   deleted_at: { type: Date, default: null }
 }, { timestamps: true, strict: false });
 
-transactionSchema.index({ id: 1 }, { unique: true });
+transactionSchema.index({ id: 1, user_id: 1 }, { unique: true });
 transactionSchema.index({ user_id: 1 });
 transactionSchema.index({ updated_at: -1 });
 
@@ -36,7 +36,7 @@ const genericSchema = new mongoose.Schema({
   user_id: { type: String, required: true },
 }, { strict: false, timestamps: true });
 
-genericSchema.index({ id: 1 }, { unique: true });
+genericSchema.index({ id: 1, user_id: 1 }, { unique: true });
 genericSchema.index({ user_id: 1 });
 
 module.exports = {
