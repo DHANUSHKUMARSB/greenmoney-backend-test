@@ -227,6 +227,15 @@ app.post("/sync/universal", limiter, async (req, res) => {
       const Collection = UserService[ServiceMethod](userId);
       
       const bulkOps = items.map(item => {
+        if (item.deleted_at) {
+          // If the item is marked as deleted, perform a hard delete in the cloud
+          return {
+            deleteOne: {
+              filter: { id: item.id, user_id: userId }
+            }
+          };
+        }
+        
         const updateData = { ...item, user_id: userId };
         if (item.updated_at) updateData.updated_at = new Date(item.updated_at);
         
