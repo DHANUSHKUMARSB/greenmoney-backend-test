@@ -5,9 +5,13 @@ const path = require("path");
 
 // --- ENVIRONMENT CONFIGURATION ---
 const NODE_ENV = process.env.NODE_ENV || "development";
-require('dotenv').config({
-  path: path.resolve(__dirname, `.env.${NODE_ENV}`)
-});
+
+// Load local .env file if it exists (mainly for local development)
+const envPath = path.resolve(__dirname, `.env.${NODE_ENV}`);
+require('dotenv').config({ path: envPath });
+
+// Fallback to standard .env if specific one not found
+require('dotenv').config(); 
 
 const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
@@ -24,7 +28,7 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000 // Limit each IP to 1000 requests per window
 });
-app.use("/sync/", limiter);
+app.use("/sync", limiter);
 
 // --- SYNC ENDPOINTS ---
 
