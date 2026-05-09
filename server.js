@@ -2,16 +2,14 @@ const express = require("express");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
 const path = require("path");
+const mongoose = require("mongoose");
 
 // --- ENVIRONMENT CONFIGURATION ---
 const NODE_ENV = process.env.NODE_ENV || "development";
 
-// Load local .env file if it exists (mainly for local development)
-const envPath = path.resolve(__dirname, `.env.${NODE_ENV}`);
-require('dotenv').config({ path: envPath });
-
-// Fallback to standard .env if specific one not found
-require('dotenv').config(); 
+// Load environment variables
+require('dotenv').config({ path: path.resolve(__dirname, `.env.${NODE_ENV}`) });
+require('dotenv').config(); // Fallback
 
 const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
@@ -29,19 +27,28 @@ app.use((req, res, next) => {
 // --- DATABASE CONNECTION ---
 connectDB();
 
-// --- SECURITY & PERFORMANCE MIDDLEWARE ---
+// --- SECURITY ---
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000 // Limit each IP to 1000 requests per window
+  windowMs: 15 * 60 * 1000,
+  max: 1000
 });
 
-// --- SYNC ROUTER ---
-const syncRouter = express.Router();
+// --- SYNC ENDPOINTS (DIRECT) ---
 
 /**
- * Profile/Settings Sync
+ * Health Check
  */
-syncRouter.post("/profile", async (req, res) => {
+app.get("/health", (req, res) => res.json({ 
+  status: "ok", 
+  env: NODE_ENV,
+  db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  timestamp: new Date() 
+}));
+
+/**
+ * Profile Sync
+ */
+app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
   try {
     const { userId, data } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
@@ -73,15 +80,14 @@ syncRouter.post("/profile", async (req, res) => {
 });
 
 /**
- * Transactions Push (Upload to Cloud)
+ * Push Sync
  */
-syncRouter.post("/push", async (req, res) => {
+app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
   try {
     const { userId, transactions } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
     
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
-    
     const bulkOps = transactions.map(tx => ({
       updateOne: {
         filter: { local_id: tx.id },
@@ -97,10 +103,7 @@ syncRouter.post("/push", async (req, res) => {
       }
     }));
 
-    if (bulkOps.length > 0) {
-      await UserTransaction.bulkWrite(bulkOps);
-    }
-    
+    if (bulkOps.length > 0) await UserTransaction.bulkWrite(bulkOps);
     res.json({ synced: transactions.map(t => t.id), conflicts: [] });
   } catch (error) {
     console.error("Push sync error:", error);
@@ -109,16 +112,15 @@ syncRouter.post("/push", async (req, res) => {
 });
 
 /**
- * Transactions Pull (Download from Cloud)
+ * Pull Sync
  */
-syncRouter.get("/pull", async (req, res) => {
+app.get(["/sync/pull", "/sync/pull/"], limiter, async (req, res) => {
   try {
     const { userId, lastSyncTime } = req.query;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
     const query = lastSyncTime ? { updated_at: { $gt: new Date(lastSyncTime) } } : {};
-    
     const updates = await UserTransaction.find(query).lean().limit(500);
     res.json(updates);
   } catch (error) {
@@ -127,24 +129,19 @@ syncRouter.get("/pull", async (req, res) => {
   }
 });
 
-/**
- * Generic Sync for future collections
- */
-syncRouter.post("/:collectionType", async (req, res) => {
+// Generic future-proof endpoint
+app.post("/sync/:collectionType", limiter, async (req, res) => {
   try {
     const { userId, data } = req.body;
     const { collectionType } = req.params;
-    
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const Collection = UserService.getGenericCollection(userId, collectionType);
-    
     const result = await Collection.findOneAndUpdate(
       { user_id: userId },
       { $set: { ...data, last_sync: new Date() } },
       { upsert: true, new: true }
     );
-    
     res.json(result);
   } catch (error) {
     console.error(`${req.params.collectionType} sync error:`, error);
@@ -152,18 +149,13 @@ syncRouter.post("/:collectionType", async (req, res) => {
   }
 });
 
-// Apply limiter and router to /sync path
-app.use("/sync", limiter, syncRouter);
-
-app.get("/health", (req, res) => res.json({ 
-  status: "ok", 
-  env: NODE_ENV,
-  db: require('mongoose').connection.readyState === 1 ? "connected" : "disconnected",
-  timestamp: new Date() 
-}));
+// --- 404 HANDLER (With Logging) ---
+app.use((req, res) => {
+  console.log(`❌ 404 ERROR: Path not found - ${req.method} ${req.url}`);
+  res.status(404).json({ error: `Path not found: ${req.url}` });
+});
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT}`);
 });
-
