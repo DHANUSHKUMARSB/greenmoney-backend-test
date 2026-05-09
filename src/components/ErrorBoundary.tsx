@@ -1,7 +1,6 @@
 import React, { Component, ErrorInfo, ReactNode } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SafeAreaView } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { logger } from '../utils/logger';
 
 interface Props {
   children: ReactNode;
@@ -10,41 +9,51 @@ interface Props {
 
 interface State {
   hasError: boolean;
+  error: Error | null;
 }
 
-/**
- * Global Error Boundary to prevent the entire app from crashing
- */
 export class ErrorBoundary extends Component<Props, State> {
   public state: State = {
-    hasError: false
+    hasError: false,
+    error: null,
   };
 
-  public static getDerivedStateFromError(_: Error): State {
-    return { hasError: true };
+  public static getDerivedStateFromError(error: Error): State {
+    // Update state so the next render will show the fallback UI.
+    return { hasError: true, error };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
-    logger.error('Uncaught error caught by Boundary:', error, errorInfo.componentStack || '');
+    console.error('[CRITICAL ERROR]: Uncaught error in component tree:', error, errorInfo);
+    // Here we could log to a service like Sentry or Bugsnag
   }
 
-  private handleReset = () => {
-    this.setState({ hasError: false });
+  private handleRetry = () => {
+    this.setState({ hasError: false, error: null });
   };
 
   public render() {
     if (this.state.hasError) {
+      if (this.props.fallback) {
+        return this.props.fallback;
+      }
+
       return (
-        <SafeAreaView style={styles.container}>
-          <Ionicons name="alert-circle-outline" size={64} color="#FF5252" />
-          <Text style={styles.title}>Oops! Something went wrong.</Text>
+        <View style={styles.container}>
+          <Ionicons name="alert-circle-outline" size={64} color="#F44336" />
+          <Text style={styles.title}>Something went wrong</Text>
           <Text style={styles.message}>
-            We've encountered an unexpected error. Don't worry, your data is safe.
+            The application encountered an unexpected error and needs to be restarted or refreshed.
           </Text>
-          <TouchableOpacity style={styles.button} onPress={this.handleReset}>
+          {this.state.error && (
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{this.state.error.toString()}</Text>
+            </View>
+          )}
+          <TouchableOpacity style={styles.button} onPress={this.handleRetry}>
             <Text style={styles.buttonText}>Try Again</Text>
           </TouchableOpacity>
-        </SafeAreaView>
+        </View>
       );
     }
 
@@ -55,34 +64,45 @@ export class ErrorBoundary extends Component<Props, State> {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    justifyContent: 'center',
+    backgroundColor: '#fff',
     alignItems: 'center',
+    justifyContent: 'center',
     padding: 20,
-    backgroundColor: '#fff'
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
     marginTop: 20,
-    color: '#333'
+    color: '#333',
   },
   message: {
     fontSize: 16,
     color: '#666',
     textAlign: 'center',
     marginTop: 10,
-    marginBottom: 30
+    marginBottom: 20,
+  },
+  errorBox: {
+    backgroundColor: '#F5F5F5',
+    padding: 10,
+    borderRadius: 8,
+    width: '100%',
+    marginBottom: 20,
+  },
+  errorText: {
+    fontFamily: 'monospace',
+    fontSize: 12,
+    color: '#D32F2F',
   },
   button: {
     backgroundColor: '#2196F3',
-    paddingVertical: 12,
     paddingHorizontal: 30,
+    paddingVertical: 12,
     borderRadius: 25,
-    elevation: 2
   },
   buttonText: {
     color: '#fff',
+    fontWeight: 'bold',
     fontSize: 16,
-    fontWeight: '700'
-  }
+  },
 });

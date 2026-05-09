@@ -21,11 +21,15 @@ export default function App() {
   const toastRef = useRef<ToastRef>(null);
 
   useEffect(() => {
-    // 1. Sync on Resume
+    // 1. Sync & Recurring on Resume
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active') {
-        console.log('App: Resumed, triggering sync...');
+        console.log('App: Resumed, triggering sync and recurring check...');
         syncEngine.runSync();
+        
+        // Trigger recurring engine
+        const { processRecurringTransactions } = require('./src/services/recurringService');
+        processRecurringTransactions().catch((e: any) => console.error('Recurring error on resume:', e));
       }
     };
     const subscription = AppState.addEventListener('change', handleAppStateChange);
@@ -44,6 +48,11 @@ export default function App() {
       try {
         await initDatabase();
         syncService.init(); // Initialize sync listeners
+        
+        // Trigger recurring engine once database is ready
+        const { processRecurringTransactions } = require('./src/services/recurringService');
+        processRecurringTransactions().catch((e: any) => console.error('Recurring error on init:', e));
+        
         // Initial sync handled by AuthProvider
       } catch (error) {
         console.error('App setup error:', error);

@@ -1,15 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform, Switch } from 'react-native';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, Alert, TouchableOpacity, Platform, Switch, Modal, Pressable, TextInput } from 'react-native';
 import { KeyboardAwareScrollView } from 'react-native-keyboard-aware-scroll-view';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Picker } from '@react-native-picker/picker';
 import DateTimePicker from '@react-native-community/datetimepicker';
+import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../hooks/useTheme';
-import { Input } from '../components/Input';
 import { Button } from '../components/Button';
 import { Card } from '../components/Card';
-import { typography, spacing } from '../utils/theme';
 import { 
   getCategories, 
   getAccounts, 
@@ -17,61 +16,82 @@ import {
   updateTransaction, 
   getTransactionById,
   insertRecurringTransaction,
+  getBudgets,
+  getBudgetUsage,
   TransactionInput 
 } from '../services/database';
 import { useCurrency } from '../hooks/useCurrency';
-import { syncService } from '../services/syncService';
+import { useViewContextStore } from '../store/viewContextStore';
+import { getContextualDefaultDate } from '../utils/dateUtils';
 
 export const AddTransactionScreen = () => {
-  const { colors } = useTheme();
+  const { colors, spacing, typography, borderRadius } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const route = useRoute<any>();
-  const { symbol } = useCurrency();
+  const { symbol, format } = useCurrency();
   const txId = route.params?.transactionId;
 
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<'income' | 'expense' | 'transfer'>('expense');
-  const [categoryId, setCategoryId] = useState<number | null>(null);
-  const [accountId, setAccountId] = useState<number | null>(null);
+  const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [date, setDate] = useState(new Date());
   const [note, setNote] = useState('');
-  
   const [isRecurring, setIsRecurring] = useState(false);
-  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly'>('monthly');
+  const [recurringType, setRecurringType] = useState<'repeat' | 'installment'>('repeat');
+  const [frequency, setFrequency] = useState<'daily' | 'weekly' | 'monthly' | 'yearly'>('monthly');
+  const [interval, setInterval] = useState('1');
+  const [totalInstallments, setTotalInstallments] = useState('12');
   
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [categories, setCategories] = useState<any[]>([]);
   const [accounts, setAccounts] = useState<any[]>([]);
+  
   const [loading, setLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [isExceedModalVisible, setExceedModalVisible] = useState(false);
+  const [exceedData, setExceedData] = useState<any>(null);
+  
+  const amountRef = useRef<any>(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
+    isMounted.current = true;
+    if (!txId) {
+      const context = useViewContextStore.getState();
+      const defaultDate = getContextualDefaultDate(context);
+      setDate(defaultDate);
+    }
     loadData();
-  }, []);
+    return () => { isMounted.current = false; };
+  }, [txId]);
 
   const loadData = async () => {
+    setLoading(true);
     try {
-      const fetchedCategories: any[] = await getCategories();
-      const fetchedAccounts: any[] = await getAccounts();
+      const [fetchedCategories, fetchedAccounts] = await Promise.all([
+        getCategories(),
+        getAccounts()
+      ]);
       
+      if (!isMounted.current) return;
       setCategories(fetchedCategories);
       setAccounts(fetchedAccounts);
 
-      // Set defaults
-      if (fetchedAccounts.length > 0) {
+      if (fetchedAccounts.length > 0 && !accountId) {
         const cashAccount = fetchedAccounts.find((a: any) => a.name.toLowerCase() === 'cash');
         setAccountId(cashAccount ? cashAccount.id : fetchedAccounts[0].id);
       }
 
-      if (fetchedCategories.length > 0) {
+      if (fetchedCategories.length > 0 && !categoryId) {
         const expenseCategory = fetchedCategories.find((c: any) => c.type === 'expense');
         setCategoryId(expenseCategory ? expenseCategory.id : fetchedCategories[0].id);
       }
 
-      // If editing, load transaction details
       if (txId) {
         const tx = await getTransactionById(txId);
-        if (tx) {
+        if (tx && isMounted.current) {
           setAmount(tx.amount.toString());
           setType(tx.type);
           setCategoryId(tx.category_id);
@@ -81,27 +101,37 @@ export const AddTransactionScreen = () => {
         }
       }
     } catch (error) {
-      console.error('Failed to load DB data:', error);
+      console.error('Failed to load form data:', error);
+    } finally {
+      if (isMounted.current) setLoading(false);
     }
   };
 
-  const handleSave = async () => {
-    if (!amount || isNaN(Number(amount))) {
-      Alert.alert('Error', 'Please enter a valid amount');
-      return;
+  const validate = () => {
+    if (!amount || isNaN(Number(amount)) || Number(amount) <= 0) {
+      Alert.alert('Invalid Amount', 'Please enter a positive numeric value.');
+      return false;
     }
     if (!accountId) {
-      Alert.alert('Error', 'Please select an account');
-      return;
+      Alert.alert('Missing Account', 'Please select an account.');
+      return false;
     }
+    if (type !== 'transfer' && !categoryId) {
+      Alert.alert('Missing Category', 'Please select a category.');
+      return false;
+    }
+    return true;
+  };
 
-    setLoading(true);
+  const performSave = async () => {
+    if (isSaving || !validate()) return false;
+    setIsSaving(true);
     try {
       const tx: TransactionInput = {
         amount: Number(amount),
         type,
         categoryId: categoryId || undefined,
-        accountId,
+        accountId: accountId!,
         date: date.toISOString(),
         note: note.trim() || undefined,
       };
@@ -110,256 +140,254 @@ export const AddTransactionScreen = () => {
         await updateTransaction(txId, tx);
       } else {
         await insertTransaction(tx);
-        
-        // If recurring, save the template
         if (isRecurring) {
           let nextDate = new Date(date);
-          if (frequency === 'daily') nextDate.setDate(nextDate.getDate() + 1);
-          else if (frequency === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
-          else if (frequency === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
+          const jump = Number(interval || 1);
+          if (frequency === 'daily') nextDate.setDate(nextDate.getDate() + jump);
+          else if (frequency === 'weekly') nextDate.setDate(nextDate.getDate() + (7 * jump));
+          else if (frequency === 'monthly') nextDate.setMonth(nextDate.getMonth() + jump);
+          else if (frequency === 'yearly') nextDate.setFullYear(nextDate.getFullYear() + jump);
           
-          await insertRecurringTransaction(tx, frequency, nextDate.toISOString());
+          await insertRecurringTransaction(tx, {
+            recurring_type: recurringType,
+            frequency,
+            interval: jump,
+            total_installments: recurringType === 'installment' ? Number(totalInstallments) : undefined,
+            next_date: nextDate.toISOString()
+          });
         }
       }
-      syncService.syncAll(); // Trigger sync in background
-      navigation.goBack();
-    } catch (error: any) {
-      Alert.alert('Save Failed', error.message);
+      return true;
+    } catch (error) {
+      Alert.alert('Save Failed', 'An error occurred while saving.');
+      return false;
     } finally {
-      setLoading(false);
+      if (isMounted.current) setIsSaving(false);
     }
   };
 
-  const onDateChange = (event: any, selectedDate?: Date) => {
-    const currentDate = selectedDate || date;
-    setShowDatePicker(Platform.OS === 'ios');
-    setDate(currentDate);
+  const checkBudget = async () => {
+    if (type !== 'expense' || !categoryId) return false;
+    try {
+      const currentMonth = date.toISOString().slice(0, 7);
+      const budgets = await getBudgets(currentMonth);
+      const currentCategory = categories.find(c => c.id.toString() === categoryId.toString());
+      const budget = budgets.find(b => b.category_id.toString() === categoryId.toString() || (currentCategory && b.category_name === currentCategory.name));
+      
+      if (budget && budget.monthly_limit > 0) {
+        const usage = await getBudgetUsage(categoryId, currentMonth);
+        if (usage > budget.monthly_limit) {
+          setExceedData({ categoryName: budget.category_name, limit: budget.monthly_limit, usage: usage - Number(amount), currentAmount: Number(amount), exceededAmount: usage - budget.monthly_limit });
+          setExceedModalVisible(true);
+          return true;
+        }
+      }
+    } catch (e) { console.error('Budget check failed:', e); }
+    return false;
   };
+
+  const handleSave = async () => {
+    if (await performSave()) {
+      if (!(await checkBudget())) navigation.goBack();
+    }
+  };
+
+  const handleAddMore = async () => {
+    if (await performSave()) {
+      await checkBudget();
+      setAmount('');
+      setNote('');
+      setTimeout(() => amountRef.current?.focus(), 100);
+    }
+  };
+
+  const onDateChange = useCallback((event: any, selectedDate?: Date) => {
+    setShowDatePicker(Platform.OS === 'ios');
+    if (selectedDate) setDate(selectedDate);
+  }, []);
 
   const filteredCategories = categories.filter(c => c.type === type);
 
+  if (loading) return (
+    <View style={[styles.centered, { backgroundColor: colors.background }]}>
+      <Text style={{ color: colors.textSecondary }}>Loading...</Text>
+    </View>
+  );
+
   return (
-    <KeyboardAwareScrollView
-      style={{ flex: 1, backgroundColor: colors.background }}
-      contentContainerStyle={{ 
-        paddingTop: insets.top + spacing.m,
-        paddingBottom: spacing.xxl + 40 // Bottom padding for notes field
-      }}
-      enableOnAndroid={true}
-      extraScrollHeight={Platform.OS === 'ios' ? 50 : 30}
-      keyboardShouldPersistTaps="handled"
-    >
-      <View style={styles.container}>
-        <Text style={[styles.header, { color: colors.text }]}>Add Transaction</Text>
-
-        {/* Type Selector */}
-        <View style={styles.typeSelector}>
-          {(['expense', 'income', 'transfer'] as const).map((t) => (
-            <TouchableOpacity
-              key={t}
-              style={[
-                styles.typeButton,
-                { 
-                  backgroundColor: type === t ? colors.primary : 'transparent',
-                  borderColor: colors.primary,
-                }
-              ]}
-              onPress={() => {
-                setType(t);
-                const matchingCat = categories.find(c => c.type === t);
-                if (matchingCat) setCategoryId(matchingCat.id);
-              }}
-            >
-              <Text style={[
-                styles.typeButtonText,
-                { color: type === t ? 'white' : colors.primary }
-              ]}>
-                {t.charAt(0).toUpperCase() + t.slice(1)}
-              </Text>
+    <>
+      <KeyboardAwareScrollView
+        style={{ flex: 1, backgroundColor: colors.background }}
+        contentContainerStyle={{ paddingTop: insets.top + spacing.m, paddingBottom: 100 }}
+        enableOnAndroid={true}
+        keyboardShouldPersistTaps="handled"
+      >
+        <View style={styles.container}>
+          <View style={styles.headerRow}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={[styles.closeBtn, { backgroundColor: colors.card }]}>
+              <Ionicons name="close" size={24} color={colors.text} />
             </TouchableOpacity>
-          ))}
-        </View>
-
-        <Input
-          label="Amount"
-          placeholder={`${symbol}0.00`}
-          value={amount}
-          onChangeText={setAmount}
-          keyboardType="numeric"
-        />
-
-        <View style={styles.fieldContainer}>
-          <Text style={[styles.label, { color: colors.text }]}>Account</Text>
-          <View style={[styles.pickerContainer, { borderColor: colors.border, backgroundColor: colors.card }]}>
-            <Picker
-              selectedValue={accountId}
-              onValueChange={(itemValue) => setAccountId(itemValue)}
-              style={{ color: colors.text }}
-              dropdownIconColor={colors.text}
-            >
-              {accounts.map(acc => (
-                <Picker.Item key={acc.id} label={acc.name} value={acc.id} color={Platform.OS === 'ios' ? colors.text : undefined} />
-              ))}
-            </Picker>
+            <Text style={[styles.header, { color: colors.text }]}>{txId ? 'Edit' : 'New'} Transaction</Text>
+            <View style={{ width: 44 }} />
           </View>
-        </View>
 
-        {type !== 'transfer' && (
-          <View style={styles.fieldContainer}>
-            <Text style={[styles.label, { color: colors.text }]}>Category</Text>
-            <View style={[styles.pickerContainer, { borderColor: colors.border, backgroundColor: colors.card }]}>
-              <Picker
-                selectedValue={categoryId}
-                onValueChange={(itemValue) => setCategoryId(itemValue)}
-                style={{ color: colors.text }}
-                dropdownIconColor={colors.text}
-              >
-                {filteredCategories.map(cat => (
-                  <Picker.Item key={cat.id} label={cat.name} value={cat.id} color={Platform.OS === 'ios' ? colors.text : undefined} />
-                ))}
-              </Picker>
-            </View>
-          </View>
-        )}
-
-        <View style={styles.fieldContainer}>
-          <Text style={[styles.label, { color: colors.text }]}>Date</Text>
-          {Platform.OS === 'ios' ? (
-            <DateTimePicker
-              value={date}
-              mode="date"
-              display="default"
-              onChange={onDateChange}
+          <View style={[styles.amountContainer, { backgroundColor: colors.primaryContainer + '33' }]}>
+            <Text style={[styles.amountSymbol, { color: colors.primary }]}>{symbol}</Text>
+            <TextInput
+              ref={amountRef}
+              style={[styles.amountInput, { color: colors.text }]}
+              value={amount}
+              onChangeText={setAmount}
+              placeholder="0.00"
+              placeholderTextColor={colors.textSecondary + '66'}
+              keyboardType="numeric"
+              autoFocus={!txId}
             />
-          ) : (
-            <>
-              <Button 
-                title={date.toDateString()} 
-                onPress={() => setShowDatePicker(true)} 
-                variant="outline" 
-              />
-              {showDatePicker && (
-                <DateTimePicker
-                  value={date}
-                  mode="date"
-                  display="default"
-                  onChange={onDateChange}
-                />
-              )}
-            </>
-          )}
-        </View>
+          </View>
 
-        {/* Note (Optional) */}
-        <Input
-          label="Note (Optional)"
-          placeholder="Enter note..."
-          value={note}
-          onChangeText={setNote}
-          multiline
-        />
+          <View style={[styles.typeSwitcher, { backgroundColor: colors.card }]}>
+            {(['expense', 'income', 'transfer'] as const).map((t) => (
+              <TouchableOpacity
+                key={t}
+                onPress={() => { setType(t); const matchingCat = categories.find(c => c.type === t); if (matchingCat) setCategoryId(matchingCat.id); }}
+                style={[styles.typeOption, { backgroundColor: type === t ? colors.primary : 'transparent' }]}
+              >
+                <Text style={[styles.typeOptionText, { color: type === t ? '#fff' : colors.textSecondary }]}>
+                  {t.charAt(0).toUpperCase() + t.slice(1)}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-        {!txId && (
-          <Card style={styles.recurringCard}>
-            <View style={styles.recurringRow}>
-              <View>
-                <Text style={{ color: colors.text, fontWeight: '600' }}>Recurring Transaction</Text>
-                <Text style={{ color: colors.textSecondary, fontSize: 12 }}>Auto-add every period</Text>
-              </View>
-              <Switch
-                value={isRecurring}
-                onValueChange={setIsRecurring}
-                trackColor={{ false: colors.border, true: colors.primary }}
-                thumbColor="#fff"
-              />
-            </View>
-            
-            {isRecurring && (
-              <View style={styles.frequencyContainer}>
-                <Text style={{ color: colors.text, fontSize: 14, marginBottom: spacing.xs }}>Frequency</Text>
-                <View style={[styles.pickerContainer, { borderColor: colors.border, backgroundColor: colors.card }]}>
-                  <Picker
-                    selectedValue={frequency}
-                    onValueChange={(v: any) => setFrequency(v)}
-                    style={{ color: colors.text }}
-                    dropdownIconColor={colors.text}
-                  >
-                    <Picker.Item label="Daily" value="daily" />
-                    <Picker.Item label="Weekly" value="weekly" />
-                    <Picker.Item label="Monthly" value="monthly" />
+          <View style={styles.formSection}>
+            <View style={styles.inputRow}>
+              <View style={styles.inputIcon}><Ionicons name="wallet-outline" size={22} color={colors.primary} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Account</Text>
+                <View style={[styles.pickerWrapper, { backgroundColor: colors.card }]}>
+                  <Picker selectedValue={accountId} onValueChange={(v) => setAccountId(v)} style={{ color: colors.text }}>
+                    {accounts.map(acc => <Picker.Item key={acc.id} label={acc.name} value={acc.id} />)}
                   </Picker>
                 </View>
               </View>
-            )}
-          </Card>
-        )}
+            </View>
 
-        <Button
-          title={txId ? "Update Transaction" : "Save Transaction"}
-          onPress={handleSave}
-          loading={loading}
-          style={styles.saveButton}
-        />
-      </View>
-    </KeyboardAwareScrollView>
+            {type !== 'transfer' && (
+              <View style={styles.inputRow}>
+                <View style={styles.inputIcon}><Ionicons name="grid-outline" size={22} color={colors.primary} /></View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Category</Text>
+                  <View style={[styles.pickerWrapper, { backgroundColor: colors.card }]}>
+                    <Picker selectedValue={categoryId} onValueChange={(v) => setCategoryId(v)} style={{ color: colors.text }}>
+                      {filteredCategories.map(cat => <Picker.Item key={cat.id} label={cat.name} value={cat.id} />)}
+                    </Picker>
+                  </View>
+                </View>
+              </View>
+            )}
+
+            <View style={styles.inputRow}>
+              <View style={styles.inputIcon}><Ionicons name="calendar-outline" size={22} color={colors.primary} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Date</Text>
+                <TouchableOpacity onPress={() => setShowDatePicker(true)} style={[styles.dateSelector, { backgroundColor: colors.card }]}>
+                  <Text style={{ color: colors.text, fontWeight: '600' }}>{date.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })}</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            <View style={styles.inputRow}>
+              <View style={styles.inputIcon}><Ionicons name="document-text-outline" size={22} color={colors.primary} /></View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.inputLabel, { color: colors.textSecondary }]}>Note</Text>
+                <TextInput
+                  placeholder="What was this for?"
+                  placeholderTextColor={colors.textSecondary + '66'}
+                  style={[styles.noteInput, { backgroundColor: colors.card, color: colors.text }]}
+                  value={note}
+                  onChangeText={setNote}
+                  multiline
+                />
+              </View>
+            </View>
+          </View>
+
+          {!txId && (
+            <Card style={styles.recurringCard}>
+              <View style={styles.recurringHeader}>
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="repeat" size={20} color={colors.primary} style={{ marginRight: 8 }} />
+                  <Text style={{ color: colors.text, fontWeight: '700' }}>Recurring</Text>
+                </View>
+                <Switch value={isRecurring} onValueChange={setIsRecurring} trackColor={{ false: colors.border, true: colors.primary }} />
+              </View>
+              {isRecurring && (
+                <View style={styles.recurringDetails}>
+                  <View style={styles.frequencyGrid}>
+                    {['daily', 'weekly', 'monthly', 'yearly'].map(f => (
+                      <TouchableOpacity key={f} onPress={() => setFrequency(f as any)} style={[styles.freqChip, { backgroundColor: frequency === f ? colors.primary : colors.background, borderColor: colors.primary }]}>
+                        <Text style={{ color: frequency === f ? '#fff' : colors.primary, fontSize: 12, fontWeight: '700' }}>{f.charAt(0).toUpperCase() + f.slice(1)}</Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                </View>
+              )}
+            </Card>
+          )}
+
+          <View style={styles.footer}>
+            {!txId && (
+              <Button title="Save & Add More" onPress={handleAddMore} variant="outline" style={{ flex: 1 }} loading={isSaving} />
+            )}
+            <Button title={txId ? "Update" : "Save"} onPress={handleSave} style={{ flex: 1 }} loading={isSaving} />
+          </View>
+        </View>
+      </KeyboardAwareScrollView>
+
+      {showDatePicker && <DateTimePicker value={date} mode="date" display="default" onChange={onDateChange} />}
+
+      <Modal visible={isExceedModalVisible} transparent animationType="fade">
+        <Pressable style={styles.modalOverlay} onPress={() => setExceedModalVisible(false)}>
+          <Card style={styles.alertCard}>
+            <View style={styles.alertIcon}><Ionicons name="warning" size={40} color={colors.error} /></View>
+            <Text style={[styles.alertTitle, { color: colors.text }]}>Budget Exceeded</Text>
+            <Text style={[styles.alertText, { color: colors.textSecondary }]}>This transaction will put your <Text style={{ fontWeight: '700', color: colors.text }}>{exceedData?.categoryName}</Text> budget over the limit.</Text>
+            <Button title="Understood" onPress={() => { setExceedModalVisible(false); navigation.goBack(); }} style={{ width: '100%', marginTop: 20 }} />
+          </Card>
+        </Pressable>
+      </Modal>
+    </>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    padding: spacing.m,
-  },
-  header: {
-    ...typography.header,
-    marginBottom: spacing.l,
-    marginTop: spacing.s,
-  },
-  typeSelector: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: spacing.l,
-  },
-  typeButton: {
-    flex: 1,
-    paddingVertical: spacing.s,
-    borderWidth: 1,
-    borderRadius: 8,
-    marginHorizontal: spacing.xs,
-    alignItems: 'center',
-  },
-  typeButtonText: {
-    fontWeight: '600',
-  },
-  fieldContainer: {
-    marginBottom: spacing.m,
-  },
-  label: {
-    ...typography.body,
-    marginBottom: spacing.xs,
-    fontWeight: '500',
-  },
-  pickerContainer: {
-    borderWidth: 1,
-    borderRadius: 8,
-    overflow: 'hidden',
-  },
-  saveButton: {
-    marginTop: spacing.l,
-  },
-  recurringCard: {
-    marginTop: spacing.m,
-    padding: spacing.m,
-  },
-  recurringRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  frequencyContainer: {
-    marginTop: spacing.m,
-    paddingTop: spacing.m,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  }
+  container: { flex: 1, paddingHorizontal: 20 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  closeBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  header: { fontSize: 20, fontWeight: '800' },
+  amountContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 24, borderRadius: 24, marginBottom: 24 },
+  amountSymbol: { fontSize: 32, fontWeight: '600', marginRight: 4 },
+  amountInput: { fontSize: 48, fontWeight: '800', textAlign: 'center', minWidth: 100 },
+  typeSwitcher: { flexDirection: 'row', padding: 4, borderRadius: 14, marginBottom: 24 },
+  typeOption: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
+  typeOptionText: { fontSize: 14, fontWeight: '700' },
+  formSection: { gap: 20 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-start' },
+  inputIcon: { width: 40, height: 40, borderRadius: 20, alignItems: 'center', justifyContent: 'center', marginTop: 16 },
+  inputLabel: { fontSize: 13, fontWeight: '600', marginBottom: 6 },
+  pickerWrapper: { borderRadius: 12, overflow: 'hidden' },
+  dateSelector: { padding: 16, borderRadius: 12 },
+  noteInput: { padding: 16, borderRadius: 12, minHeight: 80, textAlignVertical: 'top' },
+  recurringCard: { marginTop: 24, padding: 16 },
+  recurringHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  recurringDetails: { marginTop: 16 },
+  frequencyGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  freqChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 16, borderWidth: 1 },
+  footer: { flexDirection: 'row', gap: 12, marginTop: 40 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'center', padding: 24 },
+  alertCard: { padding: 24, alignItems: 'center' },
+  alertIcon: { marginBottom: 16 },
+  alertTitle: { fontSize: 20, fontWeight: '800', marginBottom: 8 },
+  alertText: { textAlign: 'center', fontSize: 15, lineHeight: 22 },
 });

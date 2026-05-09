@@ -1,129 +1,171 @@
 import NetInfo from '@react-native-community/netinfo';
-import { localStorage, Transaction } from './localStorage';
-import { api } from './api';
+import { localStorage, Transaction, Category, Account, Budget, Goal, RecurringTransaction, BaseEntity } from './localStorage';
+import { api, SyncPayload } from './api';
 import { toastService } from './toastService';
 import { useAuthStore } from '../store/authStore';
 import { useAppStore } from '../store';
 import { syncEvents } from './syncEvents';
 import { logger } from '../utils/logger';
-import { useThemeStore } from '../store/themeStore';
+import { settingsSyncService } from './settingsSyncService';
+import { syncQueueService } from './syncQueueService';
 
-let isSyncing = false;
-let lastAutoSync = 0;
-const AUTO_SYNC_THROTTLE = 30000; 
-
-const isDataIdentical = (t1: Transaction, t2: Transaction) => {
-  return (
-    t1.amount === t2.amount &&
-    t1.category === t2.category &&
-    t1.type === t2.type &&
-    t1.description === t2.description &&
-    t1.date === t2.date &&
-    t1.deleted_at === t2.deleted_at
-  );
-};
+let isProcessing = false;
+let debounceTimer: any = null;
 
 export const syncEngine = {
+  /**
+   * REAL-TIME TRIGGER
+   * Fired immediately after any local mutation.
+   */
+  triggerSync() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      this.processQueue();
+    }, 500); // 500ms debounce for Notion-like real-time feel
+  },
+
+  /**
+   * COMPATIBILITY ALIAS
+   * Used by App.tsx, syncService.ts and AuthProvider.ts
+   */
   async runSync(isManual = false) {
-    if (isSyncing) return;
-    
-    if (!isManual && Date.now() - lastAutoSync < AUTO_SYNC_THROTTLE) {
-      return;
-    }
+    return await this.processQueue(isManual);
+  },
+
+  /**
+   * BACKGROUND QUEUE PROCESSOR
+   * Orchestrates the push of pending changes and pull of cloud updates.
+   */
+  async processQueue(isManual = false) {
+    if (isProcessing) return;
 
     const user = useAuthStore.getState().user;
     if (!user) return;
 
-    const state = await NetInfo.fetch();
-    if (!state.isConnected) {
-      if (isManual) {
-        toastService.show('No internet connection', 'error');
-        throw new Error('No internet connection');
-      }
-      return;
-    }
+    const net = await NetInfo.fetch();
+    if (!net.isConnected) return;
 
     try {
-      isSyncing = true;
-      logger.sync(`Starting ${isManual ? 'manual' : 'automatic'} sync session`);
+      isProcessing = true;
+      logger.sync(`[REAL-TIME]: Processing sync queue...`);
 
-      // 0. MIGRATION
-      await localStorage.migrateFromV1();
+      // 1. Gather all local entities that need syncing (Primary Source of Truth)
+      const [txs, cats, accs, budgets, goals, recurring] = await Promise.all([
+        localStorage.getTransactions(),
+        localStorage.getCategories(),
+        localStorage.getAccounts(),
+        localStorage.getBudgets(),
+        localStorage.getGoals(),
+        localStorage.getRecurringTransactions(),
+      ]);
 
-      // 1. PROFILE SYNC
-      const appStore = useAppStore.getState();
-      const themeStore = useThemeStore.getState();
-      
-      const profileData = {
-        settings: {
-          currency: appStore.currency,
-          reminders_enabled: appStore.remindersEnabled,
-          reminder_time: appStore.dailyReminderTime,
-          pin_enabled: !!appStore.pin,
-          accent_color: themeStore.accentColor || '#2196F3'
-        },
-        categories: await localStorage.getCategories(),
-        accounts: await localStorage.getAccounts()
+      // 2. Build Payload (Focus on anything NOT marked as 'synced')
+      const payload: SyncPayload = {
+        transactions: txs.filter(t => t.sync_status !== 'synced'),
+        categories: cats.filter(c => c.sync_status !== 'synced'),
+        accounts: accs.filter(a => a.sync_status !== 'synced'),
+        budgets: budgets.filter(b => b.sync_status !== 'synced'),
+        goals: goals.filter(g => g.sync_status !== 'synced'),
+        recurring: recurring.filter(r => r.sync_status !== 'synced'),
+        settings: settingsSyncService.getSettingsPayload(),
       };
 
-      const cloudProfile = await api.syncProfile(user.id, profileData);
-      if (cloudProfile && cloudProfile.categories) {
-        await Promise.all([
-          localStorage.saveCategories(cloudProfile.categories),
-          localStorage.saveAccounts(cloudProfile.accounts)
-        ]);
-        
-        if (appStore.isFirstLaunch && cloudProfile.settings) {
-          appStore.setCurrency(cloudProfile.settings.currency);
-          appStore.setRemindersEnabled(cloudProfile.settings.reminders_enabled);
-          appStore.setDailyReminderTime(cloudProfile.settings.reminder_time);
-          if (cloudProfile.settings.accent_color) {
-            themeStore.setAccentColor(cloudProfile.settings.accent_color);
-          }
-          appStore.setFirstLaunch(false);
-          logger.info('Cloud profile restored successfully.');
+      // 3. Universal Sync Trip (Atomic Push/Pull)
+      const response = await api.universalSync(user.id, payload);
+
+      // 4. Update Sync Status based on server confirmation
+      const sIds = response.success_ids;
+      if (sIds) {
+        if (sIds.transactions) await this.updateLocalStatus('TRANSACTIONS', sIds.transactions, 'synced');
+        if (sIds.categories) await this.updateLocalStatus('CATEGORIES', sIds.categories, 'synced');
+        if (sIds.accounts) await this.updateLocalStatus('ACCOUNTS', sIds.accounts, 'synced');
+        if (sIds.budgets) await this.updateLocalStatus('BUDGETS', sIds.budgets, 'synced');
+        if (sIds.goals) await this.updateLocalStatus('GOALS', sIds.goals, 'synced');
+        if (sIds.recurring) await this.updateLocalStatus('RECURRING', sIds.recurring, 'synced');
+      }
+
+      // 5. Reconcile Cloud Updates (Apply changes from other devices)
+      const updates = response.updates;
+      if (updates) {
+        if (updates.transactions) await this.reconcile('TRANSACTIONS', updates.transactions);
+        if (updates.categories) await this.reconcile('CATEGORIES', updates.categories);
+        if (updates.accounts) await this.reconcile('ACCOUNTS', updates.accounts);
+        if (updates.budgets) await this.reconcile('BUDGETS', updates.budgets);
+        if (updates.goals) await this.reconcile('GOALS', updates.goals);
+        if (updates.recurring) await this.reconcile('RECURRING', updates.recurring);
+        if (updates.settings) {
+          await localStorage.saveSettings(updates.settings);
+          await settingsSyncService.applyCloudSettings(updates.settings);
         }
       }
 
-      // 2. TRANSACTION PULL
-      const lastSyncTime = isManual ? null : await localStorage.getLastSyncTimestamp();
-      const cloudUpdates = await api.pullSync(user.id, lastSyncTime);
-      
-      if (cloudUpdates.length > 0) {
-        for (const cloudTx of cloudUpdates) {
-          const localTx = await localStorage.getTransactionById(cloudTx.local_id);
-          if (!localTx || cloudTx.version > localTx.version) {
-            await localStorage.updateTransaction(cloudTx.local_id, { ...cloudTx, id: cloudTx.local_id, sync_status: 'synced' }, true);
-          }
-        }
-      }
-
-      // 3. TRANSACTION PUSH
-      const pending = await localStorage.getPendingTransactions();
-      if (pending.length > 0) {
-        const pushResult = await api.pushSync(user.id, pending);
-        if (pushResult.synced.length > 0) {
-          for (const localId of pushResult.synced) {
-            await localStorage.updateTransaction(localId, { sync_status: 'synced' }, true);
-          }
-        }
-      }
-
-      // 4. STORAGE OPTIMIZATION
-      await localStorage.garbageCollect();
-
-      // 5. FINISH
-      lastAutoSync = Date.now();
+      // 6. Finalize
       await localStorage.setLastSyncTimestamp(new Date().toISOString());
       syncEvents.emitSyncCompleted();
-      
-      logger.sync('Sync session completed.');
-      if (isManual) toastService.show('Data Synced', 'success');
+      logger.sync('[REAL-TIME]: Sync completed successfully.');
+      if (isManual) toastService.show('Cloud Backup Complete', 'success');
+
     } catch (error: any) {
-      logger.error('Sync failed', error);
-      if (isManual) throw error; // Re-throw only if manual so UI can catch it
+      logger.error('[REAL-TIME]: Sync failed', error);
+      if (isManual) toastService.show('Sync failed - saved locally', 'error');
     } finally {
-      isSyncing = false;
+      isProcessing = false;
+    }
+  },
+
+  /**
+   * Helper to update local sync_status after successful cloud push
+   */
+  async updateLocalStatus(collection: string, ids: string[], status: 'synced' | 'failed') {
+    const methodMap: any = {
+      TRANSACTIONS: localStorage.updateTransaction,
+      CATEGORIES: localStorage.updateCategory,
+      ACCOUNTS: localStorage.updateAccount,
+      BUDGETS: localStorage.updateBudget,
+      GOALS: localStorage.updateGoal,
+      RECURRING: localStorage.updateRecurring,
+    };
+    const update = methodMap[collection];
+    if (update) {
+      for (const id of ids) await update(id, { sync_status: status }, true);
+    }
+  },
+
+  /**
+   * RECONCILIATION: Intelligent Cloud -> Local Sync
+   */
+  async reconcile(collection: string, cloudItems: BaseEntity[]) {
+    const methodMap: any = {
+      TRANSACTIONS: { get: localStorage.getTransactionById, update: localStorage.updateTransaction },
+      CATEGORIES: { get: async (id: string) => (await localStorage.getCategories()).find(c => c.id === id), update: localStorage.updateCategory },
+      ACCOUNTS: { get: async (id: string) => (await localStorage.getAccounts()).find(a => a.id === id), update: localStorage.updateAccount },
+      BUDGETS: { get: async (id: string) => (await localStorage.getBudgets()).find(b => b.id === id), update: localStorage.updateBudget },
+      GOALS: { get: async (id: string) => (await localStorage.getGoals()).find(g => g.id === id), update: localStorage.updateGoal },
+      RECURRING: { get: async (id: string) => (await localStorage.getRecurringTransactions()).find(r => r.id === id), update: localStorage.updateRecurring },
+    };
+
+    const target = methodMap[collection];
+    if (!target) return;
+
+    for (const cloudItem of cloudItems) {
+      const localItem = await target.get(cloudItem.id);
+
+      if (!localItem) {
+        // Missing locally -> Pull from cloud
+        await target.update(cloudItem.id, { ...cloudItem, sync_status: 'synced' }, true);
+      } else {
+        // Exists on both -> Version check
+        if (cloudItem.version > localItem.version) {
+          await target.update(cloudItem.id, { ...cloudItem, sync_status: 'synced' }, true);
+        } else if (localItem.sync_status === 'synced' && cloudItem.version === localItem.version) {
+          // Already synced, do nothing
+        }
+      }
     }
   }
 };
+
+// Start the processor on mutation
+syncEvents.on('mutation_detected', () => {
+  syncEngine.triggerSync();
+});

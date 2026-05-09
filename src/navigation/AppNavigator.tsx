@@ -9,38 +9,74 @@ import { SignupScreen } from '../screens/SignupScreen';
 import { UploadScreen } from '../screens/UploadScreen';
 import { AIPreviewScreen } from '../screens/AIPreviewScreen';
 import { FilteredTransactionsScreen } from '../screens/FilteredTransactionsScreen';
+import { ForgotPasswordScreen } from '../screens/ForgotPasswordScreen';
+import { ResetPasswordScreen } from '../screens/ResetPasswordScreen';
+import * as Linking from 'expo-linking';
 import { Loader } from '../components/Loader';
 import { useAppStore } from '../store';
-import { PinLockScreen } from '../screens/PinLockScreen';
 import NetInfo from '@react-native-community/netinfo';
-import { syncService } from '../services/syncService';
+import { syncEngine } from '../services/syncEngine';
 import { registerBackgroundSync, unregisterBackgroundSync } from '../services/backgroundSync';
 import { AppState, AppStateStatus } from 'react-native';
 
 const Stack = createNativeStackNavigator();
 
+const prefix = Linking.createURL('/');
+
+const linking = {
+  prefixes: [prefix, 'greenmoney://'],
+  config: {
+    screens: {
+      ResetPassword: 'reset-password',
+    },
+  },
+};
+
 export const AppNavigator = () => {
   const { isDark, colors } = useTheme();
   const { user, isLoading } = useAuthStore();
-  const { pin } = useAppStore();
-  const [isUnlocked, setIsUnlocked] = React.useState(false);
+  const [isAppInitialized, setIsAppInitialized] = React.useState(false);
 
-  // 1. Initial Sync on Login/Restore & Background Task Management
+  // 1. App Initialization Flow (Auth -> Settings -> Render)
   React.useEffect(() => {
-    if (user) {
-      syncService.syncAll();
-      registerBackgroundSync();
-    } else {
-      unregisterBackgroundSync();
-    }
-  }, [user]);
+    const initialize = async () => {
+      console.log('[STARTUP]: App initialization sequence starting...');
+      
+      // If auth is still loading (checking session), wait.
+      if (isLoading) {
+        console.log('[STARTUP]: Auth is loading, waiting...');
+        return;
+      }
+
+      if (user) {
+        console.log(`[STARTUP]: User detected (${user.id}). Fetching cloud settings...`);
+        try {
+          const { settingsService } = require('../services/settingsService');
+          // This is the CRITICAL blocking call to restore cloud preferences
+          await settingsService.initializeSettings();
+          console.log('[STARTUP]: Cloud settings restoration complete.');
+        } catch (e) {
+          console.log('[STARTUP]: Cloud settings fetch failed. Falling back to local cache.');
+        } finally {
+          setIsAppInitialized(true);
+          registerBackgroundSync();
+        }
+      } else {
+        console.log('[STARTUP]: No user session. Navigation to Auth flow.');
+        setIsAppInitialized(true);
+        unregisterBackgroundSync();
+      }
+    };
+
+    initialize();
+  }, [user, isLoading]);
 
   // 2. Sync on App Resume
   React.useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active' && user) {
         console.log('App: Resumed, triggering sync...');
-        syncService.syncAll();
+        syncEngine.runSync(false);
       }
     };
 
@@ -53,7 +89,7 @@ export const AppNavigator = () => {
     const unsubscribe = NetInfo.addEventListener(state => {
       if (state.isConnected && user) {
         console.log('App: Network online, triggering sync...');
-        syncService.syncAll();
+        syncEngine.runSync(false);
       }
     });
     return () => unsubscribe();
@@ -93,31 +129,30 @@ export const AppNavigator = () => {
     },
   };
 
-  if (isLoading) {
+  // Block rendering until both auth and settings are fully initialized
+  if (isLoading || !isAppInitialized) {
     return <Loader />;
   }
 
   return (
-    <NavigationContainer theme={navigationTheme}>
-      {user && pin && !isUnlocked ? (
-        <PinLockScreen onUnlock={() => setIsUnlocked(true)} />
-      ) : (
-        <Stack.Navigator screenOptions={{ headerShown: false }}>
-          {user ? (
-            <>
-              <Stack.Screen name="Main" component={TabNavigator} />
-              <Stack.Screen name="Upload" component={UploadScreen} />
-              <Stack.Screen name="AIPreview" component={AIPreviewScreen} />
-              <Stack.Screen name="FilteredTransactions" component={FilteredTransactionsScreen} />
-            </>
-          ) : (
-            <>
-              <Stack.Screen name="Login" component={LoginScreen} />
-              <Stack.Screen name="Signup" component={SignupScreen} />
-            </>
-          )}
-        </Stack.Navigator>
-      )}
+    <NavigationContainer theme={navigationTheme} linking={linking}>
+      <Stack.Navigator screenOptions={{ headerShown: false }}>
+        {user ? (
+          <>
+            <Stack.Screen name="Main" component={TabNavigator} />
+            <Stack.Screen name="Upload" component={UploadScreen} />
+            <Stack.Screen name="AIPreview" component={AIPreviewScreen} />
+            <Stack.Screen name="FilteredTransactions" component={FilteredTransactionsScreen} />
+          </>
+        ) : (
+          <>
+            <Stack.Screen name="Login" component={LoginScreen} />
+            <Stack.Screen name="Signup" component={SignupScreen} />
+            <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen} />
+            <Stack.Screen name="ResetPassword" component={ResetPasswordScreen} />
+          </>
+        )}
+      </Stack.Navigator>
     </NavigationContainer>
   );
 };

@@ -1,54 +1,77 @@
 import React from 'react';
 import { TextInput, View, Text, StyleSheet, TextInputProps } from 'react-native';
 import { useTheme } from '../hooks/useTheme';
-import { spacing, typography } from '../utils/theme';
 
 interface InputProps extends TextInputProps {
   label?: string;
   error?: string;
 }
 
-export const Input: React.FC<InputProps> = ({ label, error, style, ...props }) => {
-  const { colors } = useTheme();
+export const Input = React.forwardRef<TextInput, InputProps>(({ label, error, style, ...props }, ref) => {
+  const { colors, spacing, typography, borderRadius } = useTheme();
 
   return (
     <View style={styles.container}>
-      {label && <Text style={[styles.label, { color: colors.text }]}>{label}</Text>}
-      <TextInput
-        style={[
-          styles.input,
-          { 
-            backgroundColor: colors.card,
-            color: colors.text,
-            borderColor: error ? colors.error : colors.border,
-          },
-          style,
-        ]}
-        placeholderTextColor={colors.textSecondary}
-        {...props}
-      />
-      {error && <Text style={[styles.error, { color: colors.error }]}>{error}</Text>}
+      {label && <Text style={[
+        styles.label, 
+        { 
+          color: error ? colors.error : colors.textSecondary,
+          fontSize: typography.bodySmall.fontSize,
+          fontWeight: '500',
+          marginBottom: spacing.xs,
+        }
+      ]}>{label}</Text>}
+      <View style={[
+        styles.inputWrapper,
+        {
+          backgroundColor: colors.card,
+          borderRadius: borderRadius.m,
+          borderBottomWidth: 1,
+          borderBottomColor: error ? colors.error : colors.border,
+        },
+        style
+      ]}>
+        <TextInput
+          ref={ref}
+          style={[
+            styles.input,
+            { 
+              color: colors.text,
+              fontSize: typography.body.fontSize,
+              padding: spacing.m,
+            }
+          ]}
+          placeholderTextColor={colors.textSecondary}
+          {...props}
+        />
+      </View>
+      {error && <Text style={[
+        styles.error, 
+        { 
+          color: colors.error,
+          fontSize: typography.caption.fontSize,
+          marginTop: spacing.xs,
+        }
+      ]}>{error}</Text>}
     </View>
   );
-};
+});
 
 const styles = StyleSheet.create({
   container: {
-    marginBottom: spacing.m,
+    marginBottom: 16,
   },
-  label: {
-    ...typography.body,
-    marginBottom: spacing.xs,
-    fontWeight: '500',
+  inputWrapper: {
+    minHeight: 56,
+    justifyContent: 'center',
   },
   input: {
-    borderWidth: 1,
-    borderRadius: spacing.s,
-    padding: spacing.m,
-    ...typography.body,
+    flex: 1,
+  },
+  label: {
+    marginLeft: 4,
   },
   error: {
-    ...typography.caption,
-    marginTop: spacing.xs,
+    marginLeft: 4,
   },
 });

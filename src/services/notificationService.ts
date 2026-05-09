@@ -1,6 +1,6 @@
-import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
-import Constants from 'expo-constants';
+import Constants from "expo-constants";
+import * as Notifications from "expo-notifications";
+import { Platform } from "react-native";
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -11,23 +11,23 @@ Notifications.setNotificationHandler({
 });
 
 export const requestNotificationPermissions = async () => {
-  if (Platform.OS === 'android') {
-    await Notifications.setNotificationChannelAsync('default', {
-      name: 'default',
+  if (Platform.OS === "android") {
+    await Notifications.setNotificationChannelAsync("default", {
+      name: "default",
       importance: Notifications.AndroidImportance.MAX,
       vibrationPattern: [0, 250, 250, 250],
-      lightColor: '#FF231F7C',
+      lightColor: "#FF231F7C",
     });
   }
 
   const { status: existingStatus } = await Notifications.getPermissionsAsync();
   let finalStatus = existingStatus;
-  if (existingStatus !== 'granted') {
+  if (existingStatus !== "granted") {
     const { status } = await Notifications.requestPermissionsAsync();
     finalStatus = status;
   }
-  
-  return finalStatus === 'granted';
+
+  return finalStatus === "granted";
 };
 
 export const scheduleDailyReminder = async (hour: number, minute: number) => {
@@ -36,28 +36,32 @@ export const scheduleDailyReminder = async (hour: number, minute: number) => {
 
     const id = await Notifications.scheduleNotificationAsync({
       content: {
-        title: "💰 Time to log your spending!",
+        title: "⏰ Time to log your spending! 💰",
         body: "Don't forget to add your transactions for today to keep your budget on track.",
         sound: true,
         priority: Notifications.AndroidNotificationPriority.HIGH,
-        channelId: 'default',
+        channelId: "default",
       },
       trigger: {
         hour,
         minute,
         repeats: true,
-        channelId: 'default',
+        channelId: "default",
       },
     });
     console.log(`Notification scheduled: ${id} at ${hour}:${minute}`);
     return id;
   } catch (error) {
-    console.error('Failed to schedule notification:', error);
+    console.error("Failed to schedule notification:", error);
     return null;
   }
 };
 
-export const scheduleTransactionReminder = async (title: string, body: string, date: Date) => {
+export const scheduleTransactionReminder = async (
+  title: string,
+  body: string,
+  date: Date,
+) => {
   await Notifications.scheduleNotificationAsync({
     content: {
       title,
@@ -68,31 +72,34 @@ export const scheduleTransactionReminder = async (title: string, body: string, d
 };
 
 export const getPushToken = async () => {
-  if (Platform.OS === 'web') return null;
-  
-  const projectId = Constants.expoConfig?.extra?.eas?.projectId || Constants.easConfig?.projectId;
+  if (Platform.OS === "web") return null;
+
+  const projectId =
+    Constants.expoConfig?.extra?.eas?.projectId ||
+    Constants.easConfig?.projectId;
   if (!projectId) {
-    console.warn('Push: No Project ID found in app.json');
+    console.warn("Push: No Project ID found in app.json");
     return null;
   }
 
   try {
-    const { status: existingStatus } = await Notifications.getPermissionsAsync();
+    const { status: existingStatus } =
+      await Notifications.getPermissionsAsync();
     let finalStatus = existingStatus;
-    if (existingStatus !== 'granted') {
+    if (existingStatus !== "granted") {
       const { status } = await Notifications.requestPermissionsAsync();
       finalStatus = status;
     }
-    if (finalStatus !== 'granted') {
-      console.warn('Push: Failed to get push token for push notification!');
+    if (finalStatus !== "granted") {
+      console.warn("Push: Failed to get push token for push notification!");
       return null;
     }
 
     const token = await Notifications.getExpoPushTokenAsync({ projectId });
-    console.log('Push: Expo Push Token:', token.data);
+    console.log("Push: Expo Push Token:", token.data);
     return token.data;
   } catch (error) {
-    console.error('Push: Error getting push token:', error);
+    console.error("Push: Error getting push token:", error);
     return null;
   }
 };

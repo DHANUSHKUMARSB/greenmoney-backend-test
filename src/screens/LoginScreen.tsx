@@ -1,16 +1,16 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, Alert, KeyboardAvoidingView, Platform, TouchableOpacity, ScrollView } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../hooks/useTheme';
 import { Input } from '../components/Input';
 import { Button } from '../components/Button';
-import { typography, spacing } from '../utils/theme';
 import { signIn } from '../services/authService';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { Ionicons } from '@expo/vector-icons';
 
 export const LoginScreen = () => {
-  const { colors } = useTheme();
+  const { colors, spacing, typography, borderRadius } = useTheme();
   const insets = useSafeAreaInsets();
   const navigation = useNavigation<NativeStackNavigationProp<any>>();
   const [email, setEmail] = useState('');
@@ -22,11 +22,9 @@ export const LoginScreen = () => {
       Alert.alert('Error', 'Please fill in all fields');
       return;
     }
-
     setLoading(true);
     try {
       await signIn(email, password);
-      // Navigation to main app is handled by auth state listener in navigation/index.tsx
     } catch (error: any) {
       Alert.alert('Login Failed', error.message);
     } finally {
@@ -36,72 +34,68 @@ export const LoginScreen = () => {
 
   return (
     <KeyboardAvoidingView 
-      style={[styles.container, { backgroundColor: colors.background, paddingTop: insets.top + spacing.m }]}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
-      <View style={styles.content}>
-        <Text style={[styles.header, { color: colors.text }]}>Welcome Back</Text>
-        <Text style={[styles.subHeader, { color: colors.textSecondary }]}>Sign in to continue</Text>
+      <ScrollView contentContainerStyle={{ flexGrow: 1, paddingHorizontal: 30, paddingTop: insets.top + 60, paddingBottom: 40 }} showsVerticalScrollIndicator={false}>
+        <View style={[styles.logoContainer, { backgroundColor: colors.primaryContainer }]}>
+          <Ionicons name="leaf" size={40} color={colors.primary} />
+        </View>
 
-        <Input
-          label="Email"
-          placeholder="Enter your email"
-          value={email}
-          onChangeText={setEmail}
-          autoCapitalize="none"
-          keyboardType="email-address"
-        />
+        <Text style={[styles.header, { color: colors.text }]}>Welcome back</Text>
+        <Text style={[styles.subHeader, { color: colors.textSecondary }]}>Manage your finances with elegance and precision.</Text>
 
-        <Input
-          label="Password"
-          placeholder="Enter your password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry
-        />
+        <View style={styles.form}>
+          <Input
+            label="Email"
+            placeholder="name@example.com"
+            value={email}
+            onChangeText={setEmail}
+            autoCapitalize="none"
+            keyboardType="email-address"
+          />
 
-        <Button 
-          title="Login" 
-          onPress={handleLogin} 
-          loading={loading} 
-          style={styles.button}
-        />
+          <Input
+            label="Password"
+            placeholder="••••••••"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry
+          />
+
+          <TouchableOpacity 
+            onPress={() => navigation.navigate('ForgotPassword')}
+            style={styles.forgotPassword}
+          >
+            <Text style={{ color: colors.primary, fontWeight: '700', fontSize: 14 }}>Forgot Password?</Text>
+          </TouchableOpacity>
+
+          <Button 
+            title="Sign In" 
+            onPress={handleLogin} 
+            loading={loading} 
+            style={styles.button}
+          />
+        </View>
 
         <View style={styles.footer}>
-          <Text style={{ color: colors.textSecondary }}>Don't have an account? </Text>
+          <Text style={{ color: colors.textSecondary, fontWeight: '500' }}>New to GreenMoney? </Text>
           <TouchableOpacity onPress={() => navigation.navigate('Signup')}>
-            <Text style={{ color: colors.primary, fontWeight: 'bold' }}>Sign up</Text>
+            <Text style={{ color: colors.primary, fontWeight: '800' }}>Create account</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </ScrollView>
     </KeyboardAvoidingView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    flex: 1,
-    padding: spacing.l,
-    justifyContent: 'center',
-  },
-  header: {
-    ...typography.header,
-    fontSize: 32,
-    marginBottom: spacing.xs,
-  },
-  subHeader: {
-    ...typography.body,
-    marginBottom: spacing.xl,
-  },
-  button: {
-    marginTop: spacing.l,
-  },
-  footer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: spacing.xl,
-  },
+  container: { flex: 1 },
+  logoContainer: { width: 80, height: 80, borderRadius: 24, alignItems: 'center', justifyContent: 'center', marginBottom: 32 },
+  header: { fontSize: 36, fontWeight: '900', marginBottom: 12, letterSpacing: -1 },
+  subHeader: { fontSize: 16, lineHeight: 24, marginBottom: 40, paddingRight: 20 },
+  form: { gap: 12 },
+  button: { marginTop: 24, height: 56 },
+  forgotPassword: { alignSelf: 'flex-end', marginTop: 4 },
+  footer: { flexDirection: 'row', justifyContent: 'center', marginTop: 48 },
 });

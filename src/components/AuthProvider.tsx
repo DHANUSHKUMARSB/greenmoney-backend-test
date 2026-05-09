@@ -10,7 +10,7 @@ import { useAppStore } from '../store';
 
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
-  const { setSession, setUser, setLoading } = useAuthStore();
+  const { setSession, setUser, setUsername, setLoading } = useAuthStore();
   const clearAppStore = useAppStore(state => state.setTransactions);
 
   useEffect(() => {
@@ -22,6 +22,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
+        const metadata = session.user.user_metadata;
+        const name = metadata?.username || session.user.email?.split('@')[0] || 'User';
+        setUsername(name);
         try { 
           await setupDefaultDataForUser(); 
           syncEvents.emitSyncCompleted(); // Refresh UI filters immediately
@@ -63,6 +66,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
+        const metadata = session.user.user_metadata;
+        const name = metadata?.username || session.user.email?.split('@')[0] || 'User';
+        setUsername(name);
         try { 
           await setupDefaultDataForUser(); 
           await processRecurringTransactions();

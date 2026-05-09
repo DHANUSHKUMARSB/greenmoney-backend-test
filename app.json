@@ -2,11 +2,11 @@
   "expo": {
     "name": "GreenMoney",
     "slug": "GreenMoney",
+    "scheme": "greenmoney",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/GreenMoney-1024.png",
     "userInterfaceStyle": "automatic",
-    "newArchEnabled": true,
     "splash": {
       "image": "./assets/images/GreenMoney-1024.png",
       "resizeMode": "contain",
@@ -30,7 +30,10 @@
     "web": {
       "favicon": "./assets/images/GreenMoney-1024.png"
     },
-    "plugins": ["expo-notifications"],
+    "plugins": [
+      "expo-notifications",
+      "expo-secure-store"
+    ],
     "extra": {
       "eas": {
         "projectId": "c961fbb6-1436-4f6c-b0fb-4f1f577dae92"
