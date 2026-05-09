@@ -25,7 +25,28 @@ app.use((req, res, next) => {
 });
 
 // --- DATABASE CONNECTION ---
-connectDB();
+connectDB().then(async () => {
+  // --- DATABASE CLEANUP & MIGRATION ---
+  try {
+    const mongoose = require("mongoose");
+    // List of collections to check for old indexes
+    const collections = ['transactions', 'categories', 'accounts', 'budgets', 'goals', 'recurring'];
+    for (const collName of collections) {
+      try {
+        const collection = mongoose.connection.collection(collName);
+        const indexes = await collection.indexes();
+        if (indexes.some(idx => idx.name === 'local_id_1')) {
+          console.log(`[DB-CLEANUP]: Dropping obsolete local_id_1 index from ${collName}`);
+          await collection.dropIndex('local_id_1');
+        }
+      } catch (err) {
+        // Collection might not exist yet, ignore
+      }
+    }
+  } catch (error) {
+    console.error("[DB-CLEANUP]: Failed to cleanup old indexes:", error);
+  }
+});
 
 // --- SECURITY ---
 const limiter = rateLimit({
