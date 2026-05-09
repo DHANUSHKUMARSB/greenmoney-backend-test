@@ -18,7 +18,13 @@ const UserService = require("./services/UserService");
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "50mb" })); // Support large sync batches
+app.use(express.json({ limit: "50mb" }));
+
+// --- REQUEST LOGGER ---
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
+});
 
 // --- DATABASE CONNECTION ---
 connectDB();
@@ -28,14 +34,14 @@ const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000 // Limit each IP to 1000 requests per window
 });
-app.use("/sync", limiter);
 
-// --- SYNC ENDPOINTS ---
+// --- SYNC ROUTER ---
+const syncRouter = express.Router();
 
 /**
  * Profile/Settings Sync
  */
-app.post("/sync/profile", async (req, res) => {
+syncRouter.post("/profile", async (req, res) => {
   try {
     const { userId, data } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
@@ -45,7 +51,6 @@ app.post("/sync/profile", async (req, res) => {
 
     if (!data) return res.json(cloudProfile || {});
 
-    // Bulk Update Pattern
     const update = {
       $set: {
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
@@ -70,14 +75,13 @@ app.post("/sync/profile", async (req, res) => {
 /**
  * Transactions Push (Upload to Cloud)
  */
-app.post("/sync/push", async (req, res) => {
+syncRouter.post("/push", async (req, res) => {
   try {
     const { userId, transactions } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
     
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
     
-    // Optimization: Bulk Write Operation (MUCH faster than one-by-one)
     const bulkOps = transactions.map(tx => ({
       updateOne: {
         filter: { local_id: tx.id },
@@ -107,7 +111,7 @@ app.post("/sync/push", async (req, res) => {
 /**
  * Transactions Pull (Download from Cloud)
  */
-app.get("/sync/pull", async (req, res) => {
+syncRouter.get("/pull", async (req, res) => {
   try {
     const { userId, lastSyncTime } = req.query;
     if (!userId) return res.status(400).json({ error: "userId is required" });
@@ -115,7 +119,6 @@ app.get("/sync/pull", async (req, res) => {
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
     const query = lastSyncTime ? { updated_at: { $gt: new Date(lastSyncTime) } } : {};
     
-    // Performance: use .lean() for faster, read-only JSON fetching
     const updates = await UserTransaction.find(query).lean().limit(500);
     res.json(updates);
   } catch (error) {
@@ -125,9 +128,9 @@ app.get("/sync/pull", async (req, res) => {
 });
 
 /**
- * Generic Sync for future collections (Budgets, Goals, etc.)
+ * Generic Sync for future collections
  */
-app.post("/sync/:collectionType", async (req, res) => {
+syncRouter.post("/:collectionType", async (req, res) => {
   try {
     const { userId, data } = req.body;
     const { collectionType } = req.params;
@@ -136,7 +139,6 @@ app.post("/sync/:collectionType", async (req, res) => {
 
     const Collection = UserService.getGenericCollection(userId, collectionType);
     
-    // Simple upsert logic for generic data
     const result = await Collection.findOneAndUpdate(
       { user_id: userId },
       { $set: { ...data, last_sync: new Date() } },
@@ -150,17 +152,18 @@ app.post("/sync/:collectionType", async (req, res) => {
   }
 });
 
+// Apply limiter and router to /sync path
+app.use("/sync", limiter, syncRouter);
+
 app.get("/health", (req, res) => res.json({ 
   status: "ok", 
   env: NODE_ENV,
+  db: require('mongoose').connection.readyState === 1 ? "connected" : "disconnected",
   timestamp: new Date() 
 }));
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT}`);
-  if (NODE_ENV === "production") {
-    console.log("!!! ATTENTION: SERVER IS RUNNING IN PRODUCTION MODE !!!");
-  }
 });
 
