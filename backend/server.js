@@ -205,13 +205,18 @@ app.post("/sync/universal", limiter, async (req, res) => {
       if (!items || items.length === 0) return;
       const Collection = UserService[ServiceMethod](userId);
       
-      const bulkOps = items.map(item => ({
-        updateOne: {
-          filter: { id: item.id },
-          update: { $set: { ...item, user_id: userId, updated_at: new Date(item.updated_at) } },
-          upsert: true
-        }
-      }));
+      const bulkOps = items.map(item => {
+        const updateData = { ...item, user_id: userId };
+        if (item.updated_at) updateData.updated_at = new Date(item.updated_at);
+        
+        return {
+          updateOne: {
+            filter: { id: item.id, user_id: userId },
+            update: { $set: updateData },
+            upsert: true
+          }
+        };
+      });
 
       await Collection.bulkWrite(bulkOps);
       results.success_ids[resultKey] = items.map(i => i.id);
