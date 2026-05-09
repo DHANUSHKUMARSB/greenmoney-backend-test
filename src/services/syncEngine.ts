@@ -36,7 +36,10 @@ export const syncEngine = {
 
     const state = await NetInfo.fetch();
     if (!state.isConnected) {
-      if (isManual) toastService.show('No internet connection', 'error');
+      if (isManual) {
+        toastService.show('No internet connection', 'error');
+        throw new Error('No internet connection');
+      }
       return;
     }
 
@@ -118,6 +121,7 @@ export const syncEngine = {
       if (isManual) toastService.show('Data Synced', 'success');
     } catch (error: any) {
       logger.error('Sync failed', error);
+      if (isManual) throw error; // Re-throw only if manual so UI can catch it
     } finally {
       isSyncing = false;
     }

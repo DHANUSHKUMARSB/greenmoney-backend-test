@@ -1,96 +1,98 @@
-require('dotenv').config();
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
+const path = require("path");
+const mongoose = require("mongoose");
+
+// --- ENVIRONMENT CONFIGURATION ---
+const NODE_ENV = process.env.NODE_ENV || "development";
+
+// Load environment variables
+require('dotenv').config({ path: path.resolve(__dirname, `.env.${NODE_ENV}`) });
+require('dotenv').config(); // Fallback
+
+const { connectDB } = require("./config/database");
+const UserService = require("./services/UserService");
 
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "50mb" })); // Support large sync batches
+app.use(express.json({ limit: "50mb" }));
 
-// --- SECURITY & PERFORMANCE MIDDLEWARE ---
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000 // Limit each IP to 1000 requests per window
+// --- REQUEST LOGGER ---
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  next();
 });
-app.use("/sync/", limiter);
 
-// MongoDB Connection with Performance Tuning
-mongoose.connect(process.env.MONGODB_URI, {
-  maxPoolSize: 10, // Maintain up to 10 socket connections
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
-})
-  .then(() => console.log("Connected to MongoDB Atlas (Optimized)"))
-  .catch(err => console.error("MongoDB connection error:", err));
+// --- DATABASE CONNECTION ---
+connectDB();
 
-// --- SCHEMAS (With Optimized Indexing) ---
+// --- SECURITY ---
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 1000
+});
 
-const transactionSchema = new mongoose.Schema({
-  local_id: { type: String, required: true },
-  user_id: { type: String, required: true },
-  amount: { type: Number, required: true },
-  type: { type: String, enum: ['income', 'expense', 'transfer'], required: true },
-  category: { type: String, required: true },
-  description: { type: String, default: "" },
-  date: { type: String, required: true },
-  version: { type: Number, default: 1 },
-  updated_at: { type: Date, default: Date.now },
-  deleted_at: { type: Date, default: null }
-}, { timestamps: true });
+// --- SYNC ENDPOINTS (DIRECT) ---
 
-// CRITICAL: High-performance indexes
-transactionSchema.index({ local_id: 1 }, { unique: true });
-transactionSchema.index({ user_id: 1 });
-transactionSchema.index({ updated_at: -1 });
+/**
+ * Health Check
+ */
+app.get("/health", (req, res) => res.json({ 
+  status: "ok", 
+  env: NODE_ENV,
+  db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  timestamp: new Date() 
+}));
 
-const profileSchema = new mongoose.Schema({
-  user_id: { type: String, required: true, unique: true },
-  settings: {
-    theme: { type: String, default: 'system' },
-    accent_color: { type: String, default: '#2196F3' },
-    currency: { type: String, default: 'INR' },
-    reminders_enabled: { type: Boolean, default: false },
-    reminder_time: { type: String, default: '09:00' },
-    pin_enabled: { type: Boolean, default: false }
-  },
-  categories: Array,
-  accounts: Array,
-  last_sync: { type: Date, default: Date.now }
-}, { timestamps: true });
-
-profileSchema.index({ user_id: 1 });
-
-// --- DYNAMIC MODEL HELPERS ---
-
-const getTransactionModel = (userId) => {
-  const sanitizedId = userId.replace(/[^a-zA-Z0-9]/g, '');
-  const collectionName = `transactions_${sanitizedId}`;
-  return mongoose.models[collectionName] || mongoose.model(collectionName, transactionSchema, collectionName);
-};
-
-const getProfileModel = (userId) => {
-  const sanitizedId = userId.replace(/[^a-zA-Z0-9]/g, '');
-  const collectionName = `profile_${sanitizedId}`;
-  return mongoose.models[collectionName] || mongoose.model(collectionName, profileSchema, collectionName);
-};
-
-// --- SYNC ENDPOINTS ---
-
-app.post("/sync/profile", async (req, res) => {
+/**
+ * Profile Sync
+ */
+app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
   try {
     const { userId, data } = req.body;
-    const Profile = getProfileModel(userId);
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const Profile = UserService.getUserProfileCollection(userId);
     let cloudProfile = await Profile.findOne({ user_id: userId }).lean();
+
+    // --- INITIALIZE DEFAULT DATA FOR NEW USERS ---
+    const defaultCategories = [
+      { id: `cat_food_${userId}`, user_id: userId, name: 'Food', type: 'expense', display_order: 0, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_transport_${userId}`, user_id: userId, name: 'Transport', type: 'expense', display_order: 1, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_shopping_${userId}`, user_id: userId, name: 'Shopping', type: 'expense', display_order: 2, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_salary_${userId}`, user_id: userId, name: 'Salary', type: 'income', display_order: 3, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_bills_${userId}`, user_id: userId, name: 'Bills', type: 'expense', display_order: 4, updated_at: new Date().toISOString(), version: 1 },
+    ];
+
+    const defaultAccounts = [
+      { id: `acc_cash_${userId}`, user_id: userId, name: 'Cash', type: 'cash', balance: 0, updated_at: new Date().toISOString(), version: 1 },
+      { id: `acc_bank_${userId}`, user_id: userId, name: 'Bank', type: 'bank', balance: 0, updated_at: new Date().toISOString(), version: 1 },
+    ];
+
+    if (!data && !cloudProfile) {
+      // First time access with no data - Return defaults
+      return res.json({
+        user_id: userId,
+        settings: { theme: 'system', accent_color: '#2196F3', currency: 'INR' },
+        categories: defaultCategories,
+        accounts: defaultAccounts
+      });
+    }
 
     if (!data) return res.json(cloudProfile || {});
 
     // Bulk Update Pattern
     const update = {
       $set: {
+        username: data.username || cloudProfile?.username || "",
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
-        categories: data.categories || cloudProfile?.categories || [],
-        accounts: data.accounts || cloudProfile?.accounts || [],
+        categories: (data.categories && data.categories.length > 0) 
+          ? data.categories 
+          : ((cloudProfile?.categories && cloudProfile.categories.length > 0) ? cloudProfile.categories : defaultCategories),
+        accounts: (data.accounts && data.accounts.length > 0) 
+          ? data.accounts 
+          : ((cloudProfile?.accounts && cloudProfile.accounts.length > 0) ? cloudProfile.accounts : defaultAccounts),
         last_sync: new Date()
       }
     };
@@ -102,53 +104,191 @@ app.post("/sync/profile", async (req, res) => {
     );
     res.json(result);
   } catch (error) {
+    console.error("Profile sync error:", error);
     res.status(500).json({ error: "Profile sync failed" });
   }
 });
 
-app.post("/sync/push", async (req, res) => {
+/**
+ * Push Sync
+ */
+app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
   try {
     const { userId, transactions } = req.body;
-    const UserTransaction = getTransactionModel(userId);
+    if (!userId) return res.status(400).json({ error: "userId is required" });
     
-    // Optimization: Bulk Write Operation (MUCH faster than one-by-one)
-    const bulkOps = transactions.map(tx => ({
-      updateOne: {
-        filter: { local_id: tx.id },
-        update: { 
-          $set: { 
-            ...tx, 
-            local_id: tx.id,
-            updated_at: new Date(tx.updated_at),
-            deleted_at: tx.deleted_at ? new Date(tx.deleted_at) : null 
-          } 
-        },
-        upsert: true
+    const UserTransaction = UserService.getUserTransactionsCollection(userId);
+    const bulkOps = transactions.map(tx => {
+      if (tx.deleted_at) {
+        return {
+          deleteOne: {
+            filter: { local_id: tx.id, user_id: userId }
+          }
+        };
       }
-    }));
+      return {
+        updateOne: {
+          filter: { local_id: tx.id, user_id: userId },
+          update: { 
+            $set: { 
+              ...tx, 
+              user_id: userId,
+              local_id: tx.id,
+              updated_at: new Date(tx.updated_at),
+              deleted_at: null 
+            } 
+          },
+          upsert: true
+        }
+      };
+    });
 
-    await UserTransaction.bulkWrite(bulkOps);
+    if (bulkOps.length > 0) await UserTransaction.bulkWrite(bulkOps);
     res.json({ synced: transactions.map(t => t.id), conflicts: [] });
   } catch (error) {
+    console.error("Push sync error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get("/sync/pull", async (req, res) => {
+/**
+ * Pull Sync
+ */
+app.get(["/sync/pull", "/sync/pull/"], limiter, async (req, res) => {
   try {
     const { userId, lastSyncTime } = req.query;
-    const UserTransaction = getTransactionModel(userId);
-    const query = lastSyncTime ? { updated_at: { $gt: new Date(lastSyncTime) } } : {};
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const UserTransaction = UserService.getUserTransactionsCollection(userId);
+    const query = { user_id: userId };
+    if (lastSyncTime) query.updated_at = { $gt: new Date(lastSyncTime) };
     
-    // Performance: use .lean() for faster, read-only JSON fetching
     const updates = await UserTransaction.find(query).lean().limit(500);
     res.json(updates);
   } catch (error) {
+    console.error("Pull sync error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
+/**
+ * UNIVERSAL SYNC (Real-Time Engine)
+ * Handles all collections in a single atomic trip.
+ */
+app.post("/sync/universal", limiter, async (req, res) => {
+  try {
+    const { userId, payload } = req.body;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const results = {
+      success_ids: {
+        transactions: [],
+        categories: [],
+        accounts: [],
+        budgets: [],
+        goals: [],
+        recurring: []
+      },
+      updates: {
+        transactions: [],
+        categories: [],
+        accounts: [],
+        budgets: [],
+        goals: [],
+        recurring: [],
+        settings: null
+      }
+    };
+
+    // Helper to process bulk updates for a collection
+    const processCollection = async (items, collectionType, ServiceMethod, resultKey) => {
+      if (!items || items.length === 0) return;
+      const Collection = UserService[ServiceMethod](userId);
+      
+      const bulkOps = items.map(item => ({
+        updateOne: {
+          filter: { id: item.id },
+          update: { $set: { ...item, user_id: userId, updated_at: new Date(item.updated_at) } },
+          upsert: true
+        }
+      }));
+
+      await Collection.bulkWrite(bulkOps);
+      results.success_ids[resultKey] = items.map(i => i.id);
+    };
+
+    // 1. Process Pushes
+    if (payload) {
+      await Promise.all([
+        processCollection(payload.transactions, 'transactions', 'getUserTransactionsCollection', 'transactions'),
+        processCollection(payload.categories, 'categories', 'getUserCategoriesCollection', 'categories'),
+        processCollection(payload.accounts, 'accounts', 'getUserAccountsCollection', 'accounts'),
+        processCollection(payload.budgets, 'budgets', 'getUserBudgetsCollection', 'budgets'),
+        processCollection(payload.goals, 'goals', 'getUserGoalsCollection', 'goals'),
+        processCollection(payload.recurring, 'recurring', 'getUserRecurringTransactionsCollection', 'recurring'),
+      ]);
+
+      // Process Settings separately (Profile Collection)
+      if (payload.settings) {
+        const Profile = UserService.getUserProfileCollection(userId);
+        const updatedProfile = await Profile.findOneAndUpdate(
+          { user_id: userId },
+          { $set: { settings: payload.settings, updated_at: new Date() } },
+          { upsert: true, new: true }
+        );
+        results.updates.settings = updatedProfile.settings;
+      }
+    }
+
+    // 2. Process Pulls (Fetch latest items for this user specifically)
+    const pullCollection = async (ServiceMethod, resultKey) => {
+      const Collection = UserService[ServiceMethod](userId);
+      results.updates[resultKey] = await Collection.find({ user_id: userId }).lean().limit(1000);
+    };
+
+    await Promise.all([
+      pullCollection('getUserTransactionsCollection', 'transactions'),
+      pullCollection('getUserCategoriesCollection', 'categories'),
+      pullCollection('getUserAccountsCollection', 'accounts'),
+      pullCollection('getUserBudgetsCollection', 'budgets'),
+      pullCollection('getUserGoalsCollection', 'goals'),
+      pullCollection('getUserRecurringTransactionsCollection', 'recurring'),
+    ]);
+
+    res.json(results);
+  } catch (error) {
+    console.error("Universal sync error:", error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+// Generic future-proof endpoint
+app.post("/sync/:collectionType", limiter, async (req, res) => {
+  try {
+    const { userId, data } = req.body;
+    const { collectionType } = req.params;
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const Collection = UserService.getGenericCollection(userId, collectionType);
+    const result = await Collection.findOneAndUpdate(
+      { user_id: userId },
+      { $set: { ...data, last_sync: new Date() } },
+      { upsert: true, new: true }
+    );
+    res.json(result);
+  } catch (error) {
+    console.error(`${req.params.collectionType} sync error:`, error);
+    res.status(500).json({ error: "Sync failed" });
+  }
+});
+
+// --- 404 HANDLER (With Logging) ---
+app.use((req, res) => {
+  console.log(`❌ 404 ERROR: Path not found - ${req.method} ${req.url}`);
+  res.status(404).json({ error: `Path not found: ${req.url}` });
+});
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Production Sync Server listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT}`);
+});
