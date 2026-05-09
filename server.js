@@ -56,13 +56,38 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     const Profile = UserService.getUserProfileCollection(userId);
     let cloudProfile = await Profile.findOne({ user_id: userId }).lean();
 
+    // --- INITIALIZE DEFAULT DATA FOR NEW USERS ---
+    const defaultCategories = [
+      { id: `cat_food_${userId}`, user_id: userId, name: 'Food', type: 'expense', display_order: 0, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_transport_${userId}`, user_id: userId, name: 'Transport', type: 'expense', display_order: 1, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_shopping_${userId}`, user_id: userId, name: 'Shopping', type: 'expense', display_order: 2, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_salary_${userId}`, user_id: userId, name: 'Salary', type: 'income', display_order: 3, updated_at: new Date().toISOString(), version: 1 },
+      { id: `cat_bills_${userId}`, user_id: userId, name: 'Bills', type: 'expense', display_order: 4, updated_at: new Date().toISOString(), version: 1 },
+    ];
+
+    const defaultAccounts = [
+      { id: `acc_cash_${userId}`, user_id: userId, name: 'Cash', type: 'cash', balance: 0, updated_at: new Date().toISOString(), version: 1 },
+      { id: `acc_bank_${userId}`, user_id: userId, name: 'Bank', type: 'bank', balance: 0, updated_at: new Date().toISOString(), version: 1 },
+    ];
+
+    if (!data && !cloudProfile) {
+      // First time access with no data - Return defaults
+      return res.json({
+        user_id: userId,
+        settings: { theme: 'system', accent_color: '#2196F3', currency: 'INR' },
+        categories: defaultCategories,
+        accounts: defaultAccounts
+      });
+    }
+
     if (!data) return res.json(cloudProfile || {});
 
+    // Bulk Update Pattern
     const update = {
       $set: {
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
-        categories: data.categories || cloudProfile?.categories || [],
-        accounts: data.accounts || cloudProfile?.accounts || [],
+        categories: (data.categories && data.categories.length > 0) ? data.categories : (cloudProfile?.categories || defaultCategories),
+        accounts: (data.accounts && data.accounts.length > 0) ? data.accounts : (cloudProfile?.accounts || defaultAccounts),
         last_sync: new Date()
       }
     };
