@@ -86,8 +86,12 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     const update = {
       $set: {
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
-        categories: (data.categories && data.categories.length > 0) ? data.categories : (cloudProfile?.categories || defaultCategories),
-        accounts: (data.accounts && data.accounts.length > 0) ? data.accounts : (cloudProfile?.accounts || defaultAccounts),
+        categories: (data.categories && data.categories.length > 0) 
+          ? data.categories 
+          : ((cloudProfile?.categories && cloudProfile.categories.length > 0) ? cloudProfile.categories : defaultCategories),
+        accounts: (data.accounts && data.accounts.length > 0) 
+          ? data.accounts 
+          : ((cloudProfile?.accounts && cloudProfile.accounts.length > 0) ? cloudProfile.accounts : defaultAccounts),
         last_sync: new Date()
       }
     };
