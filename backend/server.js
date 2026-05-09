@@ -263,7 +263,11 @@ app.post("/sync/universal", limiter, async (req, res) => {
     res.json(results);
   } catch (error) {
     console.error("Universal sync error:", error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ 
+      error: "Universal sync failed", 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined 
+    });
   }
 });
 
