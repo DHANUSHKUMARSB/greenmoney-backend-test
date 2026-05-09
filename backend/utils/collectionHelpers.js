@@ -23,7 +23,8 @@ const COLLECTION_TYPES = {
   GOALS: "goals",
   NOTIFICATIONS: "notifications",
   ACCOUNTS: "accounts",
-  RECURRING: "recurring"
+  RECURRING: "recurring",
+  CATEGORIES: "categories"
 };
 
 module.exports = {
