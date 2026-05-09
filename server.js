@@ -1,12 +1,23 @@
-require('dotenv').config();
 const express = require("express");
-const mongoose = require("mongoose");
 const cors = require("cors");
 const rateLimit = require("express-rate-limit");
+const path = require("path");
+
+// --- ENVIRONMENT CONFIGURATION ---
+const NODE_ENV = process.env.NODE_ENV || "development";
+require('dotenv').config({
+  path: path.resolve(__dirname, `.env.${NODE_ENV}`)
+});
+
+const { connectDB } = require("./config/database");
+const UserService = require("./services/UserService");
 
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: "50mb" })); // Support large sync batches
+
+// --- DATABASE CONNECTION ---
+connectDB();
 
 // --- SECURITY & PERFORMANCE MIDDLEWARE ---
 const limiter = rateLimit({
@@ -15,72 +26,17 @@ const limiter = rateLimit({
 });
 app.use("/sync/", limiter);
 
-// MongoDB Connection with Performance Tuning
-mongoose.connect(process.env.MONGODB_URI, {
-  maxPoolSize: 10, // Maintain up to 10 socket connections
-  serverSelectionTimeoutMS: 5000,
-  socketTimeoutMS: 45000,
-})
-  .then(() => console.log("Connected to MongoDB Atlas (Optimized)"))
-  .catch(err => console.error("MongoDB connection error:", err));
-
-// --- SCHEMAS (With Optimized Indexing) ---
-
-const transactionSchema = new mongoose.Schema({
-  local_id: { type: String, required: true },
-  user_id: { type: String, required: true },
-  amount: { type: Number, required: true },
-  type: { type: String, enum: ['income', 'expense', 'transfer'], required: true },
-  category: { type: String, required: true },
-  description: { type: String, default: "" },
-  date: { type: String, required: true },
-  version: { type: Number, default: 1 },
-  updated_at: { type: Date, default: Date.now },
-  deleted_at: { type: Date, default: null }
-}, { timestamps: true });
-
-// CRITICAL: High-performance indexes
-transactionSchema.index({ local_id: 1 }, { unique: true });
-transactionSchema.index({ user_id: 1 });
-transactionSchema.index({ updated_at: -1 });
-
-const profileSchema = new mongoose.Schema({
-  user_id: { type: String, required: true, unique: true },
-  settings: {
-    theme: { type: String, default: 'system' },
-    accent_color: { type: String, default: '#2196F3' },
-    currency: { type: String, default: 'INR' },
-    reminders_enabled: { type: Boolean, default: false },
-    reminder_time: { type: String, default: '09:00' },
-    pin_enabled: { type: Boolean, default: false }
-  },
-  categories: Array,
-  accounts: Array,
-  last_sync: { type: Date, default: Date.now }
-}, { timestamps: true });
-
-profileSchema.index({ user_id: 1 });
-
-// --- DYNAMIC MODEL HELPERS ---
-
-const getTransactionModel = (userId) => {
-  const sanitizedId = userId.replace(/[^a-zA-Z0-9]/g, '');
-  const collectionName = `transactions_${sanitizedId}`;
-  return mongoose.models[collectionName] || mongoose.model(collectionName, transactionSchema, collectionName);
-};
-
-const getProfileModel = (userId) => {
-  const sanitizedId = userId.replace(/[^a-zA-Z0-9]/g, '');
-  const collectionName = `profile_${sanitizedId}`;
-  return mongoose.models[collectionName] || mongoose.model(collectionName, profileSchema, collectionName);
-};
-
 // --- SYNC ENDPOINTS ---
 
+/**
+ * Profile/Settings Sync
+ */
 app.post("/sync/profile", async (req, res) => {
   try {
     const { userId, data } = req.body;
-    const Profile = getProfileModel(userId);
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const Profile = UserService.getUserProfileCollection(userId);
     let cloudProfile = await Profile.findOne({ user_id: userId }).lean();
 
     if (!data) return res.json(cloudProfile || {});
@@ -102,14 +58,20 @@ app.post("/sync/profile", async (req, res) => {
     );
     res.json(result);
   } catch (error) {
+    console.error("Profile sync error:", error);
     res.status(500).json({ error: "Profile sync failed" });
   }
 });
 
+/**
+ * Transactions Push (Upload to Cloud)
+ */
 app.post("/sync/push", async (req, res) => {
   try {
     const { userId, transactions } = req.body;
-    const UserTransaction = getTransactionModel(userId);
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+    
+    const UserTransaction = UserService.getUserTransactionsCollection(userId);
     
     // Optimization: Bulk Write Operation (MUCH faster than one-by-one)
     const bulkOps = transactions.map(tx => ({
@@ -127,28 +89,74 @@ app.post("/sync/push", async (req, res) => {
       }
     }));
 
-    await UserTransaction.bulkWrite(bulkOps);
+    if (bulkOps.length > 0) {
+      await UserTransaction.bulkWrite(bulkOps);
+    }
+    
     res.json({ synced: transactions.map(t => t.id), conflicts: [] });
   } catch (error) {
+    console.error("Push sync error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
+/**
+ * Transactions Pull (Download from Cloud)
+ */
 app.get("/sync/pull", async (req, res) => {
   try {
     const { userId, lastSyncTime } = req.query;
-    const UserTransaction = getTransactionModel(userId);
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const UserTransaction = UserService.getUserTransactionsCollection(userId);
     const query = lastSyncTime ? { updated_at: { $gt: new Date(lastSyncTime) } } : {};
     
     // Performance: use .lean() for faster, read-only JSON fetching
     const updates = await UserTransaction.find(query).lean().limit(500);
     res.json(updates);
   } catch (error) {
+    console.error("Pull sync error:", error);
     res.status(500).json({ error: error.message });
   }
 });
 
-app.get("/health", (req, res) => res.json({ status: "ok", timestamp: new Date() }));
+/**
+ * Generic Sync for future collections (Budgets, Goals, etc.)
+ */
+app.post("/sync/:collectionType", async (req, res) => {
+  try {
+    const { userId, data } = req.body;
+    const { collectionType } = req.params;
+    
+    if (!userId) return res.status(400).json({ error: "userId is required" });
+
+    const Collection = UserService.getGenericCollection(userId, collectionType);
+    
+    // Simple upsert logic for generic data
+    const result = await Collection.findOneAndUpdate(
+      { user_id: userId },
+      { $set: { ...data, last_sync: new Date() } },
+      { upsert: true, new: true }
+    );
+    
+    res.json(result);
+  } catch (error) {
+    console.error(`${req.params.collectionType} sync error:`, error);
+    res.status(500).json({ error: "Sync failed" });
+  }
+});
+
+app.get("/health", (req, res) => res.json({ 
+  status: "ok", 
+  env: NODE_ENV,
+  timestamp: new Date() 
+}));
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`🚀 Production Sync Server listening on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT}`);
+  if (NODE_ENV === "production") {
+    console.log("!!! ATTENTION: SERVER IS RUNNING IN PRODUCTION MODE !!!");
+  }
+});
+
