@@ -117,20 +117,29 @@ app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId is required" });
     
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
-    const bulkOps = transactions.map(tx => ({
-      updateOne: {
-        filter: { local_id: tx.id },
-        update: { 
-          $set: { 
-            ...tx, 
-            local_id: tx.id,
-            updated_at: new Date(tx.updated_at),
-            deleted_at: tx.deleted_at ? new Date(tx.deleted_at) : null 
-          } 
-        },
-        upsert: true
+    const bulkOps = transactions.map(tx => {
+      if (tx.deleted_at) {
+        return {
+          deleteOne: {
+            filter: { local_id: tx.id }
+          }
+        };
       }
-    }));
+      return {
+        updateOne: {
+          filter: { local_id: tx.id },
+          update: { 
+            $set: { 
+              ...tx, 
+              local_id: tx.id,
+              updated_at: new Date(tx.updated_at),
+              deleted_at: null 
+            } 
+          },
+          upsert: true
+        }
+      };
+    });
 
     if (bulkOps.length > 0) await UserTransaction.bulkWrite(bulkOps);
     res.json({ synced: transactions.map(t => t.id), conflicts: [] });
