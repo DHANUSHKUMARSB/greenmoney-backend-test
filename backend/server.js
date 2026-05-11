@@ -59,7 +59,7 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     // Ensure user DB is initialized
     await DatabaseInitializer.initUserDatabase(userId);
 
-    const Profile = UserService.getUserProfileCollection(userId);
+    const Profile = await UserService.getUserProfileCollection(userId);
     let cloudProfile = await Profile.findOne({}).lean();
 
     // --- INITIALIZE DEFAULT DATA FOR NEW USERS ---
@@ -118,7 +118,7 @@ app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
     const { userId, transactions } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
     
-    const UserTransaction = UserService.getUserTransactionsCollection(userId);
+    const UserTransaction = await UserService.getUserTransactionsCollection(userId);
     const bulkOps = transactions.map(tx => {
       if (tx.deleted_at) {
         return {
@@ -163,7 +163,7 @@ app.get(["/sync/pull", "/sync/pull/"], limiter, async (req, res) => {
     const { userId, lastSyncTime } = req.query;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
-    const UserTransaction = UserService.getUserTransactionsCollection(userId);
+    const UserTransaction = await UserService.getUserTransactionsCollection(userId);
     const query = { deleted_at: null }; // Filter out soft-deleted items if any
     if (lastSyncTime) query.updated_at = { $gt: new Date(lastSyncTime) };
     
@@ -207,7 +207,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
     // Helper to process bulk updates for a collection
     const processCollection = async (items, collectionType, ServiceMethod, resultKey) => {
       if (!items || items.length === 0) return;
-      const Collection = UserService[ServiceMethod](userId);
+      const Collection = await UserService[ServiceMethod](userId);
       
       const bulkOps = items.map(item => {
         const filter = { 
@@ -249,7 +249,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
 
       // Process Profile (Settings, Username, Avatar)
       if (payload.settings || payload.username || payload.profile_image) {
-        const Profile = UserService.getUserProfileCollection(userId);
+        const Profile = await UserService.getUserProfileCollection(userId);
         const update = { $set: { updated_at: new Date() } };
         
         if (payload.settings) update.$set.settings = payload.settings;
@@ -269,7 +269,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
 
     // 2. Process Pulls (Fetch latest items for this user specifically)
     const pullCollection = async (ServiceMethod, resultKey) => {
-      const Collection = UserService[ServiceMethod](userId);
+      const Collection = await UserService[ServiceMethod](userId);
       results.updates[resultKey] = await Collection.find({}).lean().limit(1000);
     };
 
@@ -300,7 +300,7 @@ app.post("/sync/:collectionType", limiter, async (req, res) => {
     const { collectionType } = req.params;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
-    const Collection = UserService.getGenericCollection(userId, collectionType);
+    const Collection = await UserService.getGenericCollection(userId, collectionType);
     const result = await Collection.findOneAndUpdate(
       {},
       { $set: { ...data, last_sync: new Date() } },

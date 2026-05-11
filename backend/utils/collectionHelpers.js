@@ -7,8 +7,8 @@ const { getUserDb } = require("./databaseManager");
  * @param {string} collectionType - The type of data (e.g., 'transactions', 'settings').
  * @param {mongoose.Schema} schema - The Mongoose schema to use for this collection.
  */
-const getUserModel = (userId, collectionType, schema) => {
-  const userDb = getUserDb(userId);
+const getUserModel = async (userId, collectionType, schema) => {
+  const userDb = await getUserDb(userId);
   
   // Use a capitalized, shared collection name (e.g., 'Transaction', 'Profile')
   const modelName = collectionType.charAt(0).toUpperCase() + collectionType.slice(0, -1); 
