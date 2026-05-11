@@ -251,20 +251,25 @@ app.post("/sync/universal", limiter, async (req, res) => {
         processCollection(payload.recurring, 'recurring', 'getUserRecurringTransactionsCollection', 'recurring'),
       ]);
 
-      // Process Profile (Settings, Username, Avatar)
-      if (payload.settings || payload.username || payload.profile_image) {
-        const Profile = await UserService.getUserProfileCollection(userId);
-        const update = { $set: { updated_at: new Date() } };
-        
-        if (payload.settings) update.$set.settings = payload.settings;
-        if (payload.username) update.$set.username = payload.username;
-        if (payload.profile_image) update.$set.profile_image = payload.profile_image;
+        // Process Profile (Settings, Username, Avatar)
+        if (payload.settings || payload.username || payload.profile_image) {
+          const Profile = await UserService.getUserProfileCollection(userId);
+          const update = { $set: { updated_at: new Date() } };
+          
+          if (payload.settings) {
+            // Use dot notation to avoid overwriting entire settings object
+            Object.keys(payload.settings).forEach(key => {
+              update.$set[`settings.${key}`] = payload.settings[key];
+            });
+          }
+          if (payload.username) update.$set.username = payload.username;
+          if (payload.profile_image) update.$set.profile_image = payload.profile_image;
 
-        const updatedProfile = await Profile.findOneAndUpdate(
-          {},
-          update,
-          { upsert: true, new: true }
-        );
+          const updatedProfile = await Profile.findOneAndUpdate(
+            {},
+            update,
+            { upsert: true, new: true }
+          );
         results.updates.settings = updatedProfile.settings;
         results.updates.username = updatedProfile.username;
         results.updates.profile_image = updatedProfile.profile_image;
