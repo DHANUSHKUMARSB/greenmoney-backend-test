@@ -10,8 +10,20 @@ const { getUserDb } = require("./databaseManager");
 const getUserModel = async (userId, collectionType, schema) => {
   const userDb = await getUserDb(userId);
   
-  // Use a capitalized, shared collection name (e.g., 'Transaction', 'Profile')
-  const modelName = collectionType.charAt(0).toUpperCase() + collectionType.slice(0, -1); 
+  // Map collection types to proper Model names (Singular, Capitalized)
+  const modelMap = {
+    transactions: 'Transaction',
+    profile: 'Profile',
+    settings: 'Profile',
+    budgets: 'Budget',
+    goals: 'Goal',
+    accounts: 'Account',
+    categories: 'Category',
+    recurring: 'Recurring',
+    notifications: 'Notification'
+  };
+  
+  const modelName = modelMap[collectionType] || (collectionType.charAt(0).toUpperCase() + collectionType.slice(1));
   
   // Return existing model if already compiled on this connection, otherwise create new one
   return userDb.models[modelName] || userDb.model(modelName, schema, collectionType);

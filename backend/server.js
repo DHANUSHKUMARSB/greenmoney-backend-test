@@ -106,7 +106,11 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     res.json(result);
   } catch (error) {
     console.error("Profile sync error:", error);
-    res.status(500).json({ error: "Profile sync failed" });
+    res.status(500).json({ 
+      error: "Profile sync failed", 
+      message: error.message,
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
   }
 });
 
