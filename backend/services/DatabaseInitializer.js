@@ -16,7 +16,7 @@ const DatabaseInitializer = {
     if (initializedDbs.has(userId)) return;
 
     console.log(`[DB-INIT]: Initializing isolated database for user: ${userId}`);
-    const userDb = getUserDb(userId);
+    const userDb = await getUserDb(userId);
 
     try {
       // 1. Transactions Collection & Indexes

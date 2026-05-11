@@ -37,7 +37,7 @@ const migrate = async () => {
     if (!userId) continue;
     console.log(`\n--- Migrating User: ${userId} ---`);
     
-    const userDb = getUserDb(userId);
+    const userDb = await getUserDb(userId);
 
     for (const collName of collectionsToMigrate) {
       console.log(`  Migrating ${collName}...`);
