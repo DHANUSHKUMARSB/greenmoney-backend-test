@@ -8,9 +8,10 @@ const dbCache = new Map();
  * @returns {string}
  */
 const getDbName = (userId) => {
-  const prefix = process.env.NODE_ENV === "production" ? "GreenMoneyProd" : "GreenMoneyDev";
+  const prefix = process.env.NODE_ENV === "production" ? "GM_P" : "GM_D";
   // Sanitize userId - remove non-alphanumeric
   const sanitizedId = userId.replace(/[^a-zA-Z0-9]/g, "");
+  // Max length is 38 bytes. GM_P_ (5) + 32 (UUID) = 37. Perfect.
   return `${prefix}_${sanitizedId}`;
 };
 
