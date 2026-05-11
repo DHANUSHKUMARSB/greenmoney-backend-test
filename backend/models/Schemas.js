@@ -29,8 +29,6 @@ const profileSchema = new mongoose.Schema({
   last_sync: { type: Date, default: Date.now }
 }, { timestamps: true, strict: false });
 
-profileSchema.index({ user_id: 1 });
-
 // Generic Schema for simple data structures
 const genericSchema = new mongoose.Schema({
   id: { type: String, required: true },
