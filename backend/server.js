@@ -92,6 +92,7 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     const update = {
       $set: {
         username: data.username || cloudProfile?.username || "",
+        profile_image: data.profile_image || cloudProfile?.profile_image || "",
         settings: { ...(cloudProfile?.settings || {}), ...data.settings },
         last_sync: new Date()
       }

@@ -22,6 +22,7 @@ transactionSchema.index({ updated_at: -1 });
 const profileSchema = new mongoose.Schema({
   user_id: { type: String, required: true, unique: true },
   username: { type: String, default: "" },
+  profile_image: { type: String, default: "" },
   settings: { type: Object, default: {} },
   categories: Array,
   accounts: Array,
