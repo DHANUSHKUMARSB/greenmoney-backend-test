@@ -247,15 +247,23 @@ app.post("/sync/universal", limiter, async (req, res) => {
         processCollection(payload.recurring, 'recurring', 'getUserRecurringTransactionsCollection', 'recurring'),
       ]);
 
-      // Process Settings separately (Profile Collection)
-      if (payload.settings) {
+      // Process Profile (Settings, Username, Avatar)
+      if (payload.settings || payload.username || payload.profile_image) {
         const Profile = UserService.getUserProfileCollection(userId);
+        const update = { $set: { updated_at: new Date() } };
+        
+        if (payload.settings) update.$set.settings = payload.settings;
+        if (payload.username) update.$set.username = payload.username;
+        if (payload.profile_image) update.$set.profile_image = payload.profile_image;
+
         const updatedProfile = await Profile.findOneAndUpdate(
           {},
-          { $set: { settings: payload.settings, updated_at: new Date() } },
+          update,
           { upsert: true, new: true }
         );
         results.updates.settings = updatedProfile.settings;
+        results.updates.username = updatedProfile.username;
+        results.updates.profile_image = updatedProfile.profile_image;
       }
     }
 
