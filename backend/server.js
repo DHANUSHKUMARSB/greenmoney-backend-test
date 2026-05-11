@@ -13,6 +13,7 @@ require('dotenv').config(); // Fallback
 
 const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
+const DatabaseInitializer = require("./services/DatabaseInitializer");
 
 const app = express();
 app.use(cors());
@@ -26,26 +27,7 @@ app.use((req, res, next) => {
 
 // --- DATABASE CONNECTION ---
 connectDB().then(async () => {
-  // --- DATABASE CLEANUP & MIGRATION ---
-  try {
-    const mongoose = require("mongoose");
-    // List of collections to check for old indexes
-    const collections = ['transactions', 'categories', 'accounts', 'budgets', 'goals', 'recurring'];
-    for (const collName of collections) {
-      try {
-        const collection = mongoose.connection.collection(collName);
-        const indexes = await collection.indexes();
-        if (indexes.some(idx => idx.name === 'local_id_1')) {
-          console.log(`[DB-CLEANUP]: Dropping obsolete local_id_1 index from ${collName}`);
-          await collection.dropIndex('local_id_1');
-        }
-      } catch (err) {
-        // Collection might not exist yet, ignore
-      }
-    }
-  } catch (error) {
-    console.error("[DB-CLEANUP]: Failed to cleanup old indexes:", error);
-  }
+  console.log("🚀 Server database initialization complete.");
 });
 
 // --- SECURITY ---
@@ -74,8 +56,11 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     const { userId, data } = req.body;
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
+    // Ensure user DB is initialized
+    await DatabaseInitializer.initUserDatabase(userId);
+
     const Profile = UserService.getUserProfileCollection(userId);
-    let cloudProfile = await Profile.findOne({ user_id: userId }).lean();
+    let cloudProfile = await Profile.findOne({}).lean();
 
     // --- INITIALIZE DEFAULT DATA FOR NEW USERS ---
     const defaultCategories = [
@@ -113,7 +98,7 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
     };
 
     const result = await Profile.findOneAndUpdate(
-      { user_id: userId },
+      {},
       update,
       { upsert: true, new: true }
     );
@@ -138,8 +123,7 @@ app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
         return {
           deleteOne: {
             filter: { 
-              $or: [{ id: tx.id }, { local_id: tx.id }],
-              user_id: userId 
+              $or: [{ id: tx.id }, { local_id: tx.id }]
             }
           }
         };
@@ -147,13 +131,11 @@ app.post(["/sync/push", "/sync/push/"], limiter, async (req, res) => {
       return {
         updateOne: {
           filter: { 
-            $or: [{ id: tx.id }, { local_id: tx.id }],
-            user_id: userId 
+            $or: [{ id: tx.id }, { local_id: tx.id }]
           },
           update: { 
             $set: { 
               ...tx, 
-              user_id: userId,
               id: tx.id,
               updated_at: new Date(tx.updated_at),
               deleted_at: null 
@@ -181,7 +163,7 @@ app.get(["/sync/pull", "/sync/pull/"], limiter, async (req, res) => {
     if (!userId) return res.status(400).json({ error: "userId is required" });
 
     const UserTransaction = UserService.getUserTransactionsCollection(userId);
-    const query = { user_id: userId, deleted_at: null }; // Filter out soft-deleted items if any
+    const query = { deleted_at: null }; // Filter out soft-deleted items if any
     if (lastSyncTime) query.updated_at = { $gt: new Date(lastSyncTime) };
     
     const updates = await UserTransaction.find(query).lean().limit(500);
@@ -228,8 +210,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
       
       const bulkOps = items.map(item => {
         const filter = { 
-          $or: [{ id: item.id }, { local_id: item.id }],
-          user_id: userId 
+          $or: [{ id: item.id }, { local_id: item.id }]
         };
 
         if (item.deleted_at) {
@@ -238,7 +219,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
           };
         }
         
-        const updateData = { ...item, user_id: userId, id: item.id };
+        const updateData = { ...item, id: item.id };
         if (item.updated_at) updateData.updated_at = new Date(item.updated_at);
         
         return {
@@ -269,7 +250,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
       if (payload.settings) {
         const Profile = UserService.getUserProfileCollection(userId);
         const updatedProfile = await Profile.findOneAndUpdate(
-          { user_id: userId },
+          {},
           { $set: { settings: payload.settings, updated_at: new Date() } },
           { upsert: true, new: true }
         );
@@ -280,7 +261,7 @@ app.post("/sync/universal", limiter, async (req, res) => {
     // 2. Process Pulls (Fetch latest items for this user specifically)
     const pullCollection = async (ServiceMethod, resultKey) => {
       const Collection = UserService[ServiceMethod](userId);
-      results.updates[resultKey] = await Collection.find({ user_id: userId }).lean().limit(1000);
+      results.updates[resultKey] = await Collection.find({}).lean().limit(1000);
     };
 
     await Promise.all([
@@ -312,7 +293,7 @@ app.post("/sync/:collectionType", limiter, async (req, res) => {
 
     const Collection = UserService.getGenericCollection(userId, collectionType);
     const result = await Collection.findOneAndUpdate(
-      { user_id: userId },
+      {},
       { $set: { ...data, last_sync: new Date() } },
       { upsert: true, new: true }
     );

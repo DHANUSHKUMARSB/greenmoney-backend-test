@@ -1,17 +1,20 @@
 const mongoose = require("mongoose");
+const { getUserDb } = require("./databaseManager");
 
 /**
- * Gets or creates a standardized model for a shared collection.
- * @param {string} userId - UNUSED (Maintained for API compatibility during transition)
+ * Gets or creates a standardized model for a user's isolated collection.
+ * @param {string} userId - The unique identifier for the user.
  * @param {string} collectionType - The type of data (e.g., 'transactions', 'settings').
  * @param {mongoose.Schema} schema - The Mongoose schema to use for this collection.
  */
 const getUserModel = (userId, collectionType, schema) => {
-  // Use a capitalized, shared collection name (e.g., 'Transaction', 'Profile')
-  const collectionName = collectionType.charAt(0).toUpperCase() + collectionType.slice(0, -1); 
+  const userDb = getUserDb(userId);
   
-  // Return existing model if already compiled, otherwise create new one
-  return mongoose.models[collectionName] || mongoose.model(collectionName, schema, collectionType);
+  // Use a capitalized, shared collection name (e.g., 'Transaction', 'Profile')
+  const modelName = collectionType.charAt(0).toUpperCase() + collectionType.slice(0, -1); 
+  
+  // Return existing model if already compiled on this connection, otherwise create new one
+  return userDb.models[modelName] || userDb.model(modelName, schema, collectionType);
 };
 
 // Supported Collection Types
