@@ -14,6 +14,7 @@ require('dotenv').config(); // Fallback
 const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
 const DatabaseInitializer = require("./services/DatabaseInitializer");
+const AppVersionService = require("./services/AppVersionService");
 
 const app = express();
 app.use(cors());
@@ -47,6 +48,19 @@ app.get("/health", (req, res) => res.json({
   db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
   timestamp: new Date() 
 }));
+
+/**
+ * App Version Check (For Force Updates)
+ */
+app.get("/app-version", limiter, async (req, res) => {
+  try {
+    const versionInfo = await AppVersionService.getLatestVersion();
+    res.json(versionInfo);
+  } catch (error) {
+    console.error("App version fetch error:", error);
+    res.status(500).json({ error: "Failed to fetch app version" });
+  }
+});
 
 /**
  * Profile Sync
