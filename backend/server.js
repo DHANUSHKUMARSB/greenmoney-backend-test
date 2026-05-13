@@ -15,6 +15,7 @@ const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
 const DatabaseInitializer = require("./services/DatabaseInitializer");
 const AppVersionService = require("./services/AppVersionService");
+const UserTrackingService = require("./services/UserTrackingService");
 
 const app = express();
 app.use(cors());
@@ -59,6 +60,56 @@ app.get("/app-version", limiter, async (req, res) => {
   } catch (error) {
     console.error("App version fetch error:", error);
     res.status(500).json({ error: "Failed to fetch app version" });
+  }
+});
+
+/**
+ * User Registration Tracking
+ */
+app.post("/register-tracking", limiter, async (req, res) => {
+  try {
+    const { userId, email, platform, version } = req.body;
+    if (!userId || !email) return res.status(400).json({ error: "userId and email are required" });
+
+    const result = await UserTrackingService.trackUserRegistration({
+      userId,
+      email,
+      signupPlatform: platform,
+      appVersion: version
+    });
+
+    res.json({
+      success: true,
+      userNumber: result.userNumber,
+      rewardEligible: result.rewardEligible
+    });
+  } catch (error) {
+    console.error("Registration tracking error:", error);
+    res.status(500).json({ error: "Failed to track registration" });
+  }
+});
+
+/**
+ * Admin: User Stats
+ */
+app.get("/user-stats", async (req, res) => {
+  try {
+    const stats = await UserTrackingService.getUserStats();
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch user stats" });
+  }
+});
+
+/**
+ * Admin: User Count (Quick)
+ */
+app.get("/user-count", async (req, res) => {
+  try {
+    const stats = await UserTrackingService.getUserStats();
+    res.json({ count: stats.totalUsers });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch count" });
   }
 });
 

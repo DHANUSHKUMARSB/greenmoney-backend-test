@@ -38,8 +38,33 @@ const genericSchema = new mongoose.Schema({
 genericSchema.index({ id: 1, user_id: 1 }, { unique: true });
 genericSchema.index({ user_id: 1 });
 
+// User Registration Tracking Schema
+const registeredUserSchema = new mongoose.Schema({
+  userNumber: { type: Number, unique: true },
+  userId: { type: String, required: true, unique: true },
+  email: { type: String, required: true, unique: true },
+  accountCreatedDate: String,
+  accountCreatedTime: String,
+  createdAt: { type: Date, default: Date.now },
+  signupPlatform: String,
+  appVersion: String,
+  rewardEligible: { type: Boolean, default: false }
+}, { timestamps: true });
+
+registeredUserSchema.index({ userId: 1 });
+registeredUserSchema.index({ email: 1 });
+registeredUserSchema.index({ userNumber: 1 });
+
+// Atomic Counter Schema
+const counterSchema = new mongoose.Schema({
+  _id: { type: String, required: true },
+  sequence_value: { type: Number, default: 0 }
+});
+
 module.exports = {
   transactionSchema,
   profileSchema,
-  genericSchema
+  genericSchema,
+  registeredUserSchema,
+  counterSchema
 };
