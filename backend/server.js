@@ -18,14 +18,22 @@ const AppVersionService = require("./services/AppVersionService");
 const UserTrackingService = require("./services/UserTrackingService");
 
 const app = express();
+
+// Required for express-rate-limit to work behind Render/proxies
+app.set('trust proxy', 1);
+
 app.use(cors());
 app.use(express.json({ limit: "50mb" }));
+
 
 // --- REQUEST LOGGER ---
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
   next();
 });
+
+app.get("/", (req, res) => res.json({ status: "GreenMoney Backend Alive" }));
+
 
 // --- DATABASE CONNECTION ---
 connectDB().then(async () => {
@@ -56,12 +64,15 @@ app.get("/health", (req, res) => res.json({
 app.get("/app-version", limiter, async (req, res) => {
   try {
     const versionInfo = await AppVersionService.getLatestVersion();
+    console.log("[SERVER]: Sending version info response...");
     res.json(versionInfo);
+    console.log("[SERVER]: Response sent.");
   } catch (error) {
     console.error("App version fetch error:", error);
     res.status(500).json({ error: "Failed to fetch app version" });
   }
 });
+
 
 /**
  * User Registration Tracking
@@ -319,26 +330,50 @@ app.post("/sync/universal", limiter, async (req, res) => {
         // Process Profile (Settings, Username, Avatar)
         if (payload.settings || payload.username || payload.profile_image) {
           const Profile = await UserService.getUserProfileCollection(userId);
-          const update = { $set: { updated_at: new Date() } };
+          const cloudProfile = await Profile.findOne({}).lean();
           
-          if (payload.settings) {
-            // Use dot notation to avoid overwriting entire settings object
-            Object.keys(payload.settings).forEach(key => {
-              update.$set[`settings.${key}`] = payload.settings[key];
-            });
-          }
-          if (payload.username) update.$set.username = payload.username;
-          if (payload.profile_image) update.$set.profile_image = payload.profile_image;
+          const update = { $set: { updated_at: new Date() } };
+          let shouldUpdate = false;
 
-          const updatedProfile = await Profile.findOneAndUpdate(
-            {},
-            update,
-            { upsert: true, new: true }
-          );
-        results.updates.settings = updatedProfile.settings;
-        results.updates.username = updatedProfile.username;
-        results.updates.profile_image = updatedProfile.profile_image;
-      }
+          // Only update settings if the incoming payload is newer than the cloud version
+          if (payload.settings) {
+            const incomingTime = new Date(payload.settings.updated_at || 0).getTime();
+            const cloudTime = new Date(cloudProfile?.settings?.updated_at || 0).getTime();
+            
+            if (incomingTime > cloudTime || !cloudProfile) {
+              Object.keys(payload.settings).forEach(key => {
+                update.$set[`settings.${key}`] = payload.settings[key];
+              });
+              shouldUpdate = true;
+            }
+          }
+
+          if (payload.username && payload.username !== cloudProfile?.username) {
+            update.$set.username = payload.username;
+            shouldUpdate = true;
+          }
+          if (payload.profile_image && payload.profile_image !== cloudProfile?.profile_image) {
+            update.$set.profile_image = payload.profile_image;
+            shouldUpdate = true;
+          }
+
+          if (shouldUpdate) {
+            const updatedProfile = await Profile.findOneAndUpdate(
+              {},
+              update,
+              { upsert: true, returnDocument: 'after' }
+            );
+            results.updates.settings = updatedProfile.settings;
+            results.updates.username = updatedProfile.username;
+            results.updates.profile_image = updatedProfile.profile_image;
+          } else if (cloudProfile) {
+            // Return cloud data if it was newer
+            results.updates.settings = cloudProfile.settings;
+            results.updates.username = cloudProfile.username;
+            results.updates.profile_image = cloudProfile.profile_image;
+          }
+        }
+
     }
 
     // 2. Process Pulls (Fetch latest items for this user specifically)
@@ -354,7 +389,18 @@ app.post("/sync/universal", limiter, async (req, res) => {
       pullCollection('getUserBudgetsCollection', 'budgets'),
       pullCollection('getUserGoalsCollection', 'goals'),
       pullCollection('getUserRecurringTransactionsCollection', 'recurring'),
+      // Always pull latest profile/settings to ensure multi-device consistency
+      (async () => {
+        const Profile = await UserService.getUserProfileCollection(userId);
+        const profile = await Profile.findOne({}).lean();
+        if (profile) {
+          results.updates.settings = profile.settings;
+          results.updates.username = profile.username;
+          results.updates.profile_image = profile.profile_image;
+        }
+      })()
     ]);
+
 
     res.json(results);
   } catch (error) {
@@ -394,6 +440,7 @@ app.use((req, res) => {
 });
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT}`);
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🚀 GreenMoney Backend [${NODE_ENV}] listening on port ${PORT} at 0.0.0.0`);
 });
+

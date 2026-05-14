@@ -6,59 +6,10 @@ import {
   sendPasswordResetEmail as firebaseSendPasswordResetEmail,
   updatePassword as firebaseUpdatePassword,
   updateProfile,
-  GoogleAuthProvider,
-  signInWithCredential
 } from 'firebase/auth';
 import { useAuthStore } from '../store/authStore';
 import { firebaseProfileService } from './firebaseProfileService';
 import { userTrackingService } from './userTrackingService';
-
-export const signInWithGoogle = async () => {
-  // Use a dynamic require to prevent startup crashes in Expo Go
-  let GoogleSignin;
-  try {
-    const { NativeModules } = require('react-native');
-    if (NativeModules.RNGoogleSignin || NativeModules.RNGoogleSignIn) {
-      GoogleSignin = require('@react-native-google-signin/google-signin').GoogleSignin;
-    } else {
-      throw new Error('Google Sign-In is not supported in Expo Go. Please use a development build.');
-    }
-  } catch (e: any) {
-    throw new Error(e.message || 'Google Sign-In initialization failed.');
-  }
-
-  try {
-    // 1. Get the users ID token
-    const { data } = await GoogleSignin.signIn();
-    const idToken = data?.idToken;
-
-    if (!idToken) throw new Error('Google Sign-In failed: No ID token');
-
-    // 2. Create a Firebase credential with the token
-    const googleCredential = GoogleAuthProvider.credential(idToken);
-
-    // 3. Sign-in to Firebase with the credential
-    const userCredential = await signInWithCredential(auth, googleCredential);
-    const user = userCredential.user;
-
-    // 4. Ensure profile exists in Firestore
-    await firebaseProfileService.ensureProfile(user.uid, {
-      email: user.email || '',
-      username: user.displayName || user.email?.split('@')[0] || 'User',
-      displayName: user.displayName || '',
-      profilePhoto: user.photoURL || undefined
-    });
-    
-    // 5. Track registration in MongoDB tracking system
-    // (This is non-blocking and handles duplicates internally)
-    userTrackingService.trackRegistration(user.uid, user.email || '');
-
-    return user;
-  } catch (error: any) {
-    console.error('[AUTH]: Google Sign-In failed', error.message);
-    throw error;
-  }
-};
 
 export const signUp = async (email: string, password: string, username: string) => {
   try {

@@ -2,7 +2,8 @@ import axios from 'axios';
 import { BaseEntity } from './localStorage';
 import { logger } from '../utils/logger';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'http://192.168.29.17:3000';
+const API_BASE_URL = process.env.EXPO_PUBLIC_BACKEND_URL || 'https://greenmoney-backend-r4rq.onrender.com';
+
 
 export interface SyncPayload {
   transactions?: any[];

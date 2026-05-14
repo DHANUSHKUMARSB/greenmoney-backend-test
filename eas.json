@@ -1,0 +1,54 @@
+{
+  "cli": {
+    "version": ">= 18.9.1",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "distribution": "internal"
+    },
+    "preview": {
+      "distribution": "internal",
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ksyyagtrfuarcwhixxfx.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_qdXP2jO47dxgp_xrLQPATg_o6rWlBGO",
+        "EXPO_PUBLIC_HUGGINGFACE_API_KEY": "hf_REPLACE_WITH_ACTUAL_TOKEN",
+        "EXPO_PUBLIC_BACKEND_URL": "https://greenmoney-backend-r4rq.onrender.com",
+        "EXPO_PUBLIC_API_URL": "https://greenmoney-backend-r4rq.onrender.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCBpY01GMj8K4rz_J7HW-IYAdDPqhfqTJg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "greenmoney-65d53.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "greenmoney-65d53",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "greenmoney-65d53.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "63737305502",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:63737305502:web:d28474d96eb85d63321e8f",
+        "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "G-72LNX1WD5G"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "android": {
+        "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://ksyyagtrfuarcwhixxfx.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "sb_publishable_qdXP2jO47dxgp_xrLQPATg_o6rWlBGO",
+        "EXPO_PUBLIC_HUGGINGFACE_API_KEY": "hf_REPLACE_WITH_ACTUAL_TOKEN",
+        "EXPO_PUBLIC_BACKEND_URL": "https://greenmoney-backend-r4rq.onrender.com",
+        "EXPO_PUBLIC_API_URL": "https://greenmoney-backend-r4rq.onrender.com",
+        "EXPO_PUBLIC_FIREBASE_API_KEY": "AIzaSyCBpY01GMj8K4rz_J7HW-IYAdDPqhfqTJg",
+        "EXPO_PUBLIC_FIREBASE_AUTH_DOMAIN": "greenmoney-65d53.firebaseapp.com",
+        "EXPO_PUBLIC_FIREBASE_PROJECT_ID": "greenmoney-65d53",
+        "EXPO_PUBLIC_FIREBASE_STORAGE_BUCKET": "greenmoney-65d53.firebasestorage.app",
+        "EXPO_PUBLIC_FIREBASE_MESSAGING_SENDER_ID": "63737305502",
+        "EXPO_PUBLIC_FIREBASE_APP_ID": "1:63737305502:web:d28474d96eb85d63321e8f",
+        "EXPO_PUBLIC_FIREBASE_MEASUREMENT_ID": "G-72LNX1WD5G"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

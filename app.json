@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "GreenMoney",
+    "slug": "GreenMoney",
+    "scheme": "greenmoney",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/images/GreenMoney-1024.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/images/GreenMoney-1024.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.dhanush.greenmoney"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/images/GreenMoney-1024.png",
+        "backgroundColor": "#ffffff"
+      },
+      "package": "com.dhanush.greenmoney",
+      "permissions": [
+        "android.permission.INTERNET",
+        "android.permission.VIBRATE",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.SCHEDULE_EXACT_ALARM",
+        "android.permission.WAKE_LOCK",
+        "android.permission.POST_NOTIFICATIONS"
+      ],
+      "usesCleartextTraffic": true
+    },
+    "web": {
+      "favicon": "./assets/images/GreenMoney-1024.png"
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/images/GreenMoney_48.png",
+          "color": "#2E7D32"
+        }
+      ],
+      "expo-secure-store",
+      "expo-background-task"
+    ],
+    "jsEngine": "hermes",
+    "newArchEnabled": true,
+    "extra": {
+      "eas": {
+        "projectId": "c961fbb6-1436-4f6c-b0fb-4f1f577dae92"
+      }
+    }
+  }
+}
