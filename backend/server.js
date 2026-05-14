@@ -61,7 +61,7 @@ app.get("/health", (req, res) => res.json({
 /**
  * App Version Check (For Force Updates)
  */
-app.get("/app-version", limiter, async (req, res) => {
+app.get("/app-version", async (req, res) => {
   try {
     const versionInfo = await AppVersionService.getLatestVersion();
     console.log("[SERVER]: Sending version info response...");
