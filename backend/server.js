@@ -8,8 +8,7 @@ const mongoose = require("mongoose");
 const NODE_ENV = process.env.NODE_ENV || "development";
 
 // Load environment variables
-require('dotenv').config({ path: path.resolve(__dirname, `.env.${NODE_ENV}`) });
-require('dotenv').config(); // Fallback
+require('dotenv').config();
 
 const { connectDB } = require("./config/database");
 const UserService = require("./services/UserService");
@@ -169,16 +168,35 @@ app.post(["/sync/profile", "/sync/profile/"], limiter, async (req, res) => {
       $set: {
         username: data.username || cloudProfile?.username || "",
         profile_image: data.profile_image || cloudProfile?.profile_image || "",
-        settings: { ...(cloudProfile?.settings || {}), ...data.settings },
         last_sync: new Date()
       }
     };
 
-    const result = await Profile.findOneAndUpdate(
+    let shouldUpdateSettings = false;
+    if (data.settings) {
+      const incomingTime = new Date(data.settings.updated_at || data.updated_at || 0).getTime();
+      const cloudTime = new Date(cloudProfile?.settings?.updated_at || 0).getTime();
+      
+      if (incomingTime > cloudTime || !cloudProfile || !cloudProfile.settings) {
+        update.$set.settings = { ...(cloudProfile?.settings || {}), ...data.settings };
+        shouldUpdateSettings = true;
+      }
+    }
+
+    let result = await Profile.findOneAndUpdate(
       {},
       update,
       { upsert: true, new: true }
     );
+    
+    // Ensure Mongoose document is converted to a plain JS object if needed, so we can modify it
+    if (result && typeof result.toObject === 'function') {
+      result = result.toObject();
+    }
+    
+    if (data.settings && !shouldUpdateSettings && cloudProfile?.settings) {
+      result.settings = cloudProfile.settings;
+    }
     res.json(result);
   } catch (error) {
     console.error("Profile sync error:", error);

@@ -6,7 +6,6 @@ const { transactionSchema, profileSchema, genericSchema } = require("../models/S
 
 // Load environment variables
 const NODE_ENV = process.env.NODE_ENV || "development";
-require('dotenv').config({ path: path.resolve(__dirname, `../.env.${NODE_ENV}`) });
 require('dotenv').config({ path: path.resolve(__dirname, `../.env`) });
 
 const OLD_DB_NAME = NODE_ENV === "production" ? "production" : "test";
