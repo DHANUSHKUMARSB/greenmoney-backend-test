@@ -35,9 +35,11 @@ const UserTrackingService = {
     const db = getUsersDb();
     const RegisteredUser = db.model("RegisteredUser", registeredUserSchema, "registered_users");
 
-    // 1. Check for duplicates
+    const normalizedEmail = email ? email.trim().toLowerCase() : "";
+
+    // 1. Check for duplicates (case-insensitive check by querying with normalized email)
     const existing = await RegisteredUser.findOne({ 
-      $or: [{ userId }, { email }] 
+      $or: [{ userId }, { email: normalizedEmail }] 
     });
     
     if (existing) {
@@ -61,7 +63,7 @@ const UserTrackingService = {
     const newUser = new RegisteredUser({
       userNumber,
       userId,
-      email,
+      email: normalizedEmail,
       accountCreatedDate,
       accountCreatedTime,
       createdAt: now,
@@ -71,7 +73,7 @@ const UserTrackingService = {
     });
 
     await newUser.save();
-    console.log(`[USER-TRACKING]: Registered User #${userNumber}: ${userId} (${email}). Reward: ${newUser.rewardEligible}`);
+    console.log(`[USER-TRACKING]: Registered User #${userNumber}: ${userId} (${normalizedEmail}). Reward: ${newUser.rewardEligible}`);
     
     return newUser;
   },
