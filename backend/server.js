@@ -54,6 +54,7 @@ app.get("/health", (req, res) => res.json({
   status: "ok", 
   env: NODE_ENV,
   db: mongoose.connection.readyState === 1 ? "connected" : "disconnected",
+  dbHost: mongoose.connection.host || null,
   timestamp: new Date() 
 }));
 
