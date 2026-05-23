@@ -9,7 +9,12 @@ const NODE_ENV = process.env.NODE_ENV || "development";
 require('dotenv').config({ path: path.resolve(__dirname, `../.env`) });
 
 const OLD_DB_NAME = NODE_ENV === "production" ? "production" : "test";
-const URI = process.env.MONGODB_URI;
+let URI = process.env.MONGODB_URI;
+
+// Force override to test database cluster if it still points to the old dev cluster or if none is specified
+if (!URI || URI.includes("greenmoneydev.mwqbnor.mongodb.net")) {
+  URI = "mongodb+srv://GreenMoneyTest:9788@greenmoneytest.ps3cgtb.mongodb.net/";
+}
 
 /**
  * Migration script to move data from shared collections in the 'test'/'production' database
