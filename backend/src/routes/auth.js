@@ -8,4 +8,8 @@ router.get("/check-username/:username", authController.checkUsername);
 router.patch("/username", authMiddleware, authController.updateUsername);
 router.patch("/profile-image", authMiddleware, authController.updateProfileImage);
 
+router.post("/forgot-password", authController.forgotPassword);
+router.get("/reset-password-page", authController.resetPasswordPage);
+router.post("/reset-password", authController.resetPassword);
+
 module.exports = router;

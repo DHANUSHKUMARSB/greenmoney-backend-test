@@ -1,8 +1,9 @@
 const userRepository = require("../repositories/userRepository");
 const { assertValidUsername, normalizeUsername } = require("../validators/usernameValidator");
 const { hashPassword, verifyPassword } = require("../utils/password");
-const { signJwt } = require("../utils/jwt");
+const { signJwt, verifyJwt } = require("../utils/jwt");
 const syncService = require("./syncService");
+const { sendResetEmail } = require("../utils/email");
 
 const publicUser = (user) => ({
   username: user.username,
@@ -78,5 +79,62 @@ module.exports = {
   async updateProfileImage(username, profileImage) {
     const user = await userRepository.updateByUsername(username, { profile_image: profileImage });
     return { user: publicUser(user) };
+  },
+
+  async forgotPassword({ email, req }) {
+    if (!email || !email.includes("@")) {
+      const error = new Error("Please provide a valid email address.");
+      error.status = 400;
+      throw error;
+    }
+
+    const user = await userRepository.findByEmail(email.trim().toLowerCase());
+    if (!user) {
+      const error = new Error("No account found with this email address.");
+      error.status = 404;
+      throw error;
+    }
+
+    // Generate token valid for 15 minutes (900 seconds)
+    const token = signJwt({ email: user.email }, 900);
+    const resetHost = `${req.protocol}://${req.get("host")}`;
+    const resetLink = `${resetHost}/auth/reset-password-page?token=${token}`;
+
+    await sendResetEmail(user.email, resetLink);
+
+    return { success: true, message: "Reset instructions sent successfully.", resetLink };
+  },
+
+  async resetPassword({ token, password }) {
+    if (!token) {
+      const error = new Error("Invalid or missing token.");
+      error.status = 400;
+      throw error;
+    }
+
+    if (!password || password.length < 6) {
+      const error = new Error("Password must be at least 6 characters.");
+      error.status = 400;
+      throw error;
+    }
+
+    const decoded = verifyJwt(token);
+    if (!decoded || !decoded.email) {
+      const error = new Error("Token is invalid or expired.");
+      error.status = 400;
+      throw error;
+    }
+
+    const user = await userRepository.findByEmail(decoded.email);
+    if (!user) {
+      const error = new Error("User not found.");
+      error.status = 404;
+      throw error;
+    }
+
+    const hashedPassword = hashPassword(password);
+    await userRepository.updateByUsername(user.username, { password_hash: hashedPassword });
+
+    return { success: true, message: "Password updated successfully." };
   },
 };
