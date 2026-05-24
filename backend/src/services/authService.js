@@ -20,15 +20,28 @@ module.exports = {
       throw error;
     }
 
+    if (!email || typeof email !== "string" || !email.includes("@")) {
+      const error = new Error("A valid email address is required.");
+      error.status = 400;
+      throw error;
+    }
+
     if (await userRepository.findByUsername(normalized)) {
       const error = new Error("Username is already taken.");
       error.status = 409;
       throw error;
     }
 
+    const emailNormalized = email.trim().toLowerCase();
+    if (await userRepository.findByEmail(emailNormalized)) {
+      const error = new Error("Email address is already in use.");
+      error.status = 409;
+      throw error;
+    }
+
     const user = await userRepository.create({
       username: normalized,
-      email: email ? String(email).trim().toLowerCase() : undefined,
+      email: emailNormalized,
       password_hash: hashPassword(password),
     });
 
